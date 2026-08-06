@@ -275,6 +275,12 @@ jobs:
           set -o pipefail
           make "$MODEL" > build.log 2>&1 || {
             echo "首次构建失败，收集错误信息..."
+            # 收集 configure 失败的 config.log（诊断关键：conftest 链接缺什么库）
+            for cl in $(find "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router" -maxdepth 2 -name config.log 2>/dev/null | head -8); do
+              echo "" >> build.log
+              echo "=== CONFIG_LOG: $cl ===" >> build.log
+              tail -n 60 "$cl" >> build.log
+            done
             tail -n 200 build.log
             exit 1
           }
