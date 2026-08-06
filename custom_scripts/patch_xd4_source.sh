@@ -40,6 +40,15 @@ if [ ! -d "$RSDIR/router-sysdep.rt-ax56_xd4" ]; then
   echo "✅ 已创建 router-sysdep.rt-ax56_xd4 (复制自 rt-ax56u)"
 fi
 
+# hostTools prebuilt: build_imageutil 依赖 prebuilt/<BUILD_NAME>/addvtoken
+# （675x 树没有 addvtoken.c 源文件，只有各机型的 prebuilt 二进制；XD4 复用 RT-AX56U 的）
+if [ ! -e "$RSDIR/hostTools/prebuilt/RT-AX56_XD4/addvtoken" ]; then
+  mkdir -p "$RSDIR/hostTools/prebuilt/RT-AX56_XD4"
+  cp -ar "$RSDIR/hostTools/prebuilt/RT-AX56U/addvtoken" "$RSDIR/hostTools/prebuilt/RT-AX56_XD4/addvtoken"
+  echo "✅ 已复制 prebuilt/RT-AX56_XD4/addvtoken (来自 RT-AX56U)"
+fi
+
 echo "=== 验证 ==="
 grep -c "RT-AX56_XD4" "$TARGET_MAK" | xargs echo "RT-AX56_XD4 出现次数:"
 ls -d "$RSDIR/router-sysdep.rt-ax56_xd4" >/dev/null && echo "router-sysdep.rt-ax56_xd4: OK"
+ls "$RSDIR/hostTools/prebuilt/RT-AX56_XD4/addvtoken" >/dev/null && echo "prebuilt/RT-AX56_XD4/addvtoken: OK"

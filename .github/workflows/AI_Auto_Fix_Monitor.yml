@@ -1,0 +1,157 @@
+name: AI Auto Fix Monitor
+run-name: "AI Fix → ${{ github.event.workflow_run.name }} (#${{ github.event.workflow_run.run_number }})"
+
+on:
+  workflow_run:
+    workflows:
+      - "Build Merlin Firmware for ZenWiFi XD4"
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      failed_run_id:
+        description: 'Failed Run ID'
+        required: true
+        type: string
+      failed_workflow_name:
+        description: 'Failed Workflow Name'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: ai-auto-fix-${{ github.event.workflow_run.id || inputs.failed_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  ai_fix:
+    name: "AI Fix → ${{ github.event.workflow_run.name || inputs.failed_workflow_name }}"
+    if: ${{ (github.event_name == 'workflow_dispatch') || (github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id || inputs.failed_run_id }}
+      WORKFLOW_NAME: ${{ github.event.workflow_run.name || inputs.failed_workflow_name }}
+      WORKFLOW_PATH: ${{ github.event.workflow_run.path || '.github/workflows/Build_Merlin_Firmware.yml' }}
+      REPOSITORY: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_PAT || github.token }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@main
+        with:
+          token: ${{ secrets.ACTIONS_TRIGGER_PAT || github.token }}
+          fetch-depth: 1
+
+      - name: Download error log artifact
+        run: |
+          echo "检测到工作流 [$WORKFLOW_NAME] 运行失败 (Run ID: $WORKFLOW_RUN_ID)！"
+          # 方法1: 下载 error-log artifact
+          if gh run download "$WORKFLOW_RUN_ID" -n error-log 2>/dev/null; then
+            echo "✅ 成功下载 error-log artifact"
+          else
+            echo "未找到 error-log 产物，尝试通过 gh CLI 提取失败日志..."
+            if gh run view "$WORKFLOW_RUN_ID" --log-failed 2>/dev/null | tail -n 500 > last_error.log; then
+              if [ -s last_error.log ]; then
+                echo "已从 gh run view 提取日志到 last_error.log"
+              fi
+            fi
+            if [ ! -s last_error.log ]; then
+              gh run download "$WORKFLOW_RUN_ID" --dir /tmp/failed_run_logs 2>/dev/null || true
+              if [ -d /tmp/failed_run_logs ]; then
+                find /tmp/failed_run_logs -name "*.txt" -exec cat {} \; 2>/dev/null | tail -n 500 > last_error.log || true
+              fi
+            fi
+          fi
+          # 没有真实错误日志时拒绝盲修
+          if [ ! -s last_error.log ]; then
+            echo "::error::未能获取失败工作流的真实错误日志，拒绝启动 AI 修复"
+            exit 1
+          fi
+          echo "=== 错误日志头部 ==="
+          head -20 last_error.log
+
+      - name: Classify failure
+        id: classify
+        env:
+          ERROR_LOG: last_error.log
+        run: |
+          python3 custom_scripts/classify_build_failure.py
+
+      - name: Report skip reason
+        if: steps.classify.outputs.should_fix == 'false'
+        run: |
+          echo "分类: ${{ steps.classify.outputs.classification }}"
+          echo "原因: ${{ steps.classify.outputs.reason }}"
+          echo "跳过 AI 修复（不修改代码）"
+
+      - name: Setup Node.js
+        if: steps.classify.outputs.should_fix == 'true'
+        uses: actions/setup-node@main
+        with:
+          node-version: '22'
+
+      - name: Setup Python
+        if: steps.classify.outputs.should_fix == 'true'
+        uses: actions/setup-python@main
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        if: steps.classify.outputs.should_fix == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 pyyaml
+          echo "=== 安装 OpenCode ==="
+          curl -fsSL https://bun.sh/install | bash
+          export PATH="$HOME/.bun/bin:$PATH"
+          npm install -g opencode-ai oh-my-openagent
+          mkdir -p $HOME/.config/opencode
+          oh-my-opencode install --no-tui --claude=no --gemini=no --copilot=no --skip-auth || true
+
+      - name: Run OpenCode Agent (multi-model repair)
+        id: opencode_fix
+        if: steps.classify.outputs.should_fix == 'true'
+        timeout-minutes: 120
+        env:
+          WORKFLOW_RUN_ID: ${{ env.WORKFLOW_RUN_ID }}
+          WORKFLOW_NAME: ${{ env.WORKFLOW_NAME }}
+          WORKFLOW_PATH: ${{ env.WORKFLOW_PATH }}
+          REPOSITORY: ${{ github.repository }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ZEN_API_KEY: ${{ secrets.ZEN_API_KEY }}
+          BAILIAN_API_KEY: ${{ secrets.BAILIAN_API_KEY }}
+          MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
+          SILICONFLOW_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+          MODELSCOPE_API_KEY: ${{ secrets.MODELSCOPE_API_KEY }}
+          ATOMGIT_API_KEY: ${{ secrets.ATOMGIT_API_KEY }}
+          ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+          NVIDIA_NIM_API_KEY: ${{ secrets.NVIDIA_NIM_API_KEY }}
+          QINIU_API_KEY: ${{ secrets.QINIU_API_KEY }}
+          QIANFAN_CODING_API_KEY: ${{ secrets.QIANFAN_CODING_API_KEY }}
+          VOLCANO_CODINGPLAN_API_KEY: ${{ secrets.VOLCANO_CODINGPLAN_API_KEY }}
+          VOLCANO_AGENTPLAN_API_KEY: ${{ secrets.VOLCANO_AGENTPLAN_API_KEY }}
+          ALIYUN_TOKENPLAN_API_KEY: ${{ secrets.ALIYUN_TOKENPLAN_API_KEY }}
+          MIMO_TOKENPLAN_API_KEY: ${{ secrets.MIMO_TOKENPLAN_API_KEY }}
+          KIMI_CODINGPLAN_API_KEY: ${{ secrets.KIMI_CODINGPLAN_API_KEY }}
+          ZENMUX_API_KEY: ${{ secrets.ZENMUX_API_KEY }}
+          OPENCODE_GO_API_KEY: ${{ secrets.OPENCODE_GO_API_KEY }}
+          SCNET_API_KEY: ${{ secrets.SCNET_API_KEY }}
+          TENCENT_TOKENPLAN_API_KEY: ${{ secrets.TENCENT_TOKENPLAN_API_KEY }}
+          UNICOM_CODINGPLAN_API_KEY: ${{ secrets.UNICOM_CODINGPLAN_API_KEY }}
+          QIANFAN_API_KEY: ${{ secrets.QIANFAN_API_KEY }}
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          MIMO_API_KEY: ${{ secrets.MIMO_API_KEY }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          GLM_PROXY_URL: ${{ secrets.GLM_PROXY_URL }}
+          ACTIONS_TRIGGER_PAT: ${{ secrets.ACTIONS_TRIGGER_PAT || github.token }}
+          GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_PAT || github.token }}
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          bash custom_scripts/run_track3.sh

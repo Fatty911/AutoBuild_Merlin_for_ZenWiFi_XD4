@@ -18,6 +18,8 @@ on:
           - '386'
           - '24353'
           - 'master'
+  repository_dispatch:
+    types: [Merlin Source Code Update]
   schedule:
     # 每 12 小时检查一次上游 386 分支是否有更新，有更新才构建（缓存命中则跳过）
     - cron: '0 */12 * * *'
@@ -36,7 +38,7 @@ env:
   TZ: Asia/Shanghai
   SOURCE: SWRT_Merlin_386
   REPO_URL: https://github.com/SWRT-dev/asuswrt-bcm
-  REPO_BRANCH: ${{ inputs.branch || '386' }}
+  REPO_BRANCH: ${{ github.event.client_payload.branch || inputs.branch || '386' }}
   SDK_DIR: src-rt-5.02axhnd.675x
   MODEL: ${{ inputs.model || 'rt-ax56_xd4' }}
   TOOLCHAIN_BASE: /opt/toolchains

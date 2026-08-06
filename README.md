@@ -30,10 +30,30 @@
 
 ### 2. 自动构建
 
-- **每 12 小时**检查一次上游 `386` 分支，有更新才触发构建（无更新时跳过，不消耗构建时长）
+- **上游更新检查**：`update_checker_for_Merlin.yml` 每 6 小时检查 SWRT-dev/asuswrt-bcm 的 `386` 分支，有更新时自动触发构建（repository_dispatch）
+- **构建工作流内联兜底**：每 12 小时自检一次上游 HEAD，有变化才构建（缓存命中则跳过，不消耗构建时长）
 - 推送修改 `.github/workflows/` 或 `custom_scripts/` 也会触发
 
-### 3. 获取固件
+### 3. AI 自动修复（自发现 + 大模型自修复）
+
+构建失败后 `AI_Auto_Fix_Monitor.yml` 自动接管（移植自 AutoBuild_OpenWrt_for_XiaoMi_R4 + 爬虫仓库的成熟方案）：
+
+1. 自动下载 `error-log` 产物（构建失败时自动提取的错误日志）
+2. **错误分类器**（`classify_build_failure.py`）判断失败类别：
+   - `transient`（网络抖动/克隆失败/runner 问题）→ 不修改代码，跳过
+   - `upstream`（上游仓库问题）→ 跳过，等上游修复
+   - `dependency` / `build_error` / `gate`（依赖缺失、编译错误、质量门失败）→ 启动 AI 修复
+3. **OpenCode 多模型修复**：`pick_best_model.py` + `dmxapi_meta_router.py` 收集可用模型（DeepSeek/GLM/Kimi/Qwen/MiniMax/Nemotron 等，按优先级逐个尝试），`run_track3.sh` 执行修复：
+   - 每个模型独立尝试，失败信号（401/429/模型不存在）自动切换下一个
+   - 保护 AGENTS.md/README 不被误改，限制只改 `.github/workflows/` 与 `custom_scripts/`
+   - 文件数量异常检测（防大规模误删）+ 工作流文件隔离检查
+   - **多模型共识评审**（`multi_agent_review.py`，2 模型 2 票全过才提交）
+   - 推送失败自动 rebase 重试（429 指数退避）
+4. 修复提交推送后自动**重触发失败的工作流**，闭环验证
+
+> secrets 要求：仓库已配置 25 个 AI 修复相关 secrets（DEEPSEEK_API_KEY、KIMI_CODINGPLAN_API_KEY、NVIDIA_NIM_API_KEY、ZEN_API_KEY 等），与 AutoBuild_OpenWrt 仓库一致。
+
+### 4. 获取固件
 
 构建成功后会自动：
 
