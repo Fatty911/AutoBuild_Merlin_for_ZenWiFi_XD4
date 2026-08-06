@@ -199,6 +199,9 @@ jobs:
         env:
           TERM: dumb
         run: |
+          # 构建系统的 get_extendno 等目标内部调用 git log，必须配置身份
+          git config --global user.name "Fatty911"
+          git config --global user.email "xuerui911@gmail.com"
           echo "=== 构建模型: $MODEL (SDK: $SDK_DIR) ==="
           echo "=== 磁盘剩余: $(df -h / | tail -1 | awk '{print $4}') ==="
           set -o pipefail
