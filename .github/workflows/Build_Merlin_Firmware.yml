@@ -278,9 +278,10 @@ jobs:
             # 优先收集 bluez 的 config.log（BT 链 conftest 链接失败的关键诊断）
             BLUEZ_CL="$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/bluez-5.56/config.log"
             if [ -f "$BLUEZ_CL" ]; then
+              cp -f "$BLUEZ_CL" "$GITHUB_WORKSPACE/bluez-config.log"
               echo "" >> build.log
-              echo "=== CONFIG_LOG: $BLUEZ_CL ===" >> build.log
-              tail -n 80 "$BLUEZ_CL" >> build.log
+              echo "=== CONFIG_LOG: $BLUEZ_CL (conftest 错误段) ===" >> build.log
+              grep -B8 -A25 "conftest" "$BLUEZ_CL" >> build.log || tail -n 120 "$BLUEZ_CL" >> build.log
             fi
             # 收集其余 config.log（含链接错误的行）
             for cl in $(find "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router" -maxdepth 2 -name config.log 2>/dev/null | grep -v "bluez-5.56"); do
@@ -288,12 +289,12 @@ jobs:
               echo "=== CONFIG_LOG: $cl ===" >> build.log
               tail -n 40 "$cl" >> build.log
             done
-            # 关键库缺失诊断（stage/fs.install 里缺哪个库一目了然）
+            # 关键库缺失诊断（注意 bcm947622 是符号链接，find 必须 -L 跟随）
             echo "" >> build.log
             echo "=== stage 关键库检查 ===" >> build.log
             SDK="$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR"
             for lib in libdbus-1.so libiconv.so libglib-2.0.so libical.so libicalvcal.so libssl.so libcrypto.so libnvram.so libshared.so libjson-c.so libpcre.so libudev.so libffi.so; do
-              found=$(find "$SDK" -name "$lib" 2>/dev/null | head -2 | tr '\n' ' ')
+              found=$(find -L "$SDK" -name "$lib" 2>/dev/null | head -2 | tr '\n' ' ')
               echo "$lib: ${found:-缺失}" >> build.log
             done
             tail -n 200 build.log
@@ -402,4 +403,5 @@ jobs:
           path: |
             last_error.log
             build-tail.log
+            bluez-config.log
           retention-days: 7
