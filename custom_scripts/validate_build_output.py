@@ -23,6 +23,7 @@ SOURCE_DIR = WORKSPACE / "asuswrt-bcm"
 
 
 def find_firmware(expected_pattern: str, minimum_size_mb: float) -> list[Path]:
+    """查找固件。文件名不含机型（IMGNAME 是版本号格式），机型标识内嵌在 trx 头部。"""
     image_dir = SOURCE_DIR / "release" / SDK_DIR / "image"
     if not image_dir.is_dir():
         print(f"❌ 输出目录不存在: {image_dir}")
@@ -30,11 +31,17 @@ def find_firmware(expected_pattern: str, minimum_size_mb: float) -> list[Path]:
     all_trx = sorted(image_dir.glob("*.trx"))
     print(f"输出目录: {image_dir}")
     print(f"找到 .trx 文件: {len(all_trx)}")
+    matched = []
     for p in all_trx:
-        print(f"  - {p.name} ({p.stat().st_size / 1024 / 1024:.2f} MB)")
-    matched = [p for p in all_trx if expected_pattern.lower() in p.name.lower()]
+        size_mb = p.stat().st_size / 1024 / 1024
+        # trx 头部 (trx_asus) 内嵌 BUILD_NAME，例如 "RT-AX56_XD4,3.0.0.4,386,..."
+        data = p.read_bytes()[:131072]
+        has_model = expected_pattern.encode() in data
+        print(f"  - {p.name} ({size_mb:.2f} MB, 机型标识={'✅' if has_model else '❌'})")
+        if has_model:
+            matched.append(p)
     if not matched and all_trx:
-        print(f"⚠️ 没有文件名包含机型模式 '{expected_pattern}' 的固件")
+        print(f"⚠️ 没有 trx 头部含机型标识 '{expected_pattern}' 的固件")
     return matched
 
 

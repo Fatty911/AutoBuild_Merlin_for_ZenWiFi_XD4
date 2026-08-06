@@ -181,6 +181,11 @@ jobs:
           echo "source_rev=$(git -C asuswrt-bcm rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "source_rev_short=$(git -C asuswrt-bcm rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Patch source for XD4 (386 branch model definitions)
+        working-directory: ${{ github.workspace }}
+        run: |
+          bash "$GITHUB_WORKSPACE/custom_scripts/patch_xd4_source.sh" "$GITHUB_WORKSPACE/asuswrt-bcm"
+
       - name: Verify softcenter in source
         working-directory: ${{ github.workspace }}/asuswrt-bcm
         run: |
@@ -217,14 +222,15 @@ jobs:
         id: build_info
         run: |
           cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR"
-          FW_FILE=$(ls image/*.trx 2>/dev/null | grep -E 'RT-AX56_XD4_|RT-AX56U_' | head -1)
+          # 文件名不含机型（IMGNAME=版本号格式），机型标识内嵌在 trx 头部 (trx_asus -r BUILD_NAME,...)
+          FW_FILE=$(ls image/*.trx 2>/dev/null | head -1)
           echo "FW_FILE=$FW_FILE" >> "$GITHUB_ENV"
-          if [ -n "$FW_FILE" ]; then
+          if [ -n "$FW_FILE" ] && grep -qa 'RT-AX56_XD4' "$FW_FILE"; then
             FW_VERSION=$(basename "$FW_FILE" .trx)
             echo "FW_VERSION=$FW_VERSION" >> "$GITHUB_ENV"
-            echo "找到固件: $FW_FILE"
+            echo "找到固件: $FW_FILE (trx 头部含 RT-AX56_XD4)"
           else
-            echo "::error::未找到固件输出"
+            echo "::error::未找到 XD4 固件输出"
             ls -la image/ 2>/dev/null || true
             exit 1
           fi
