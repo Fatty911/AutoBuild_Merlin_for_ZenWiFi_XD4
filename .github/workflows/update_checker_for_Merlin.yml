@@ -1,7 +1,8 @@
 #
-# 上游源码更新检查器（移植自 AutoBuild_OpenWrt_for_XiaoMi_R4 的 update_checker）
-# 定期检查 SWRT-dev/asuswrt-bcm 386 分支 HEAD，有更新时通过 repository_dispatch
-# 触发构建工作流（需要 ACTIONS_TRIGGER_PAT secret，已配置）。
+# 上游源码更新检查器（移植自 AutoBuild_OpenWrt_for_XiaoMi_R4 的 update_checker，扩展为多分支）
+# 定期检查 SWRT-dev/asuswrt-bcm 多个分支 HEAD（386 当前默认 + 24353/master 未来可能支持 XD4），
+# 任一分支有更新时通过 repository_dispatch 触发构建工作流
+# （需要 ACTIONS_TRIGGER_PAT secret，已配置；构建工作流用 client_payload.branch 选择分支）。
 #
 
 name: Update Checker for Merlin
@@ -12,7 +13,6 @@ concurrency:
 
 env:
   REPO_URL: https://github.com/SWRT-dev/asuswrt-bcm
-  REPO_BRANCH: 386
 
 on:
   workflow_dispatch:
@@ -22,36 +22,41 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 386 = 当前 XD4 构建分支；24353/master = 388 线，未来若官方支持 XD4 会自动被发现
+        branch: ['386', '24353', 'master']
     steps:
       - name: Get Commit Hash
         id: getHash
         run: |
-          git clone --depth 1 "$REPO_URL" -b "$REPO_BRANCH" . 2>/dev/null || \
-            git ls-remote "$REPO_URL" "refs/heads/$REPO_BRANCH" | awk '{print $1}' > /tmp/hash_fallback
-          if [ -d .git ]; then
-            COMMIT_HASH=$(git rev-parse HEAD)
-          else
-            COMMIT_HASH=$(cat /tmp/hash_fallback)
+          HASH=$(git ls-remote "$REPO_URL" "refs/heads/${{ matrix.branch }}" | awk '{print $1}')
+          if [ -z "$HASH" ]; then
+            echo "::warning::分支 ${{ matrix.branch }} 不存在，跳过"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          echo "commitHash=$COMMIT_HASH" >> "$GITHUB_OUTPUT"
-          echo "上游 $REPO_BRANCH HEAD: $COMMIT_HASH"
+          echo "commitHash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "上游 ${{ matrix.branch }} HEAD: $HASH"
 
       - name: Compare Commit Hash
         id: cacheHash
+        if: steps.getHash.outputs.skip != 'true'
         uses: actions/cache@main
         with:
-          path: .commitHash
-          key: HEAD-${{ steps.getHash.outputs.commitHash }}
+          path: .commitHash-${{ matrix.branch }}
+          key: HEAD-${{ matrix.branch }}-${{ steps.getHash.outputs.commitHash }}
 
       - name: Save New Commit Hash
-        if: steps.cacheHash.outputs.cache-hit != 'true'
+        if: steps.getHash.outputs.skip != 'true' && steps.cacheHash.outputs.cache-hit != 'true'
         run: |
-          echo "${{ steps.getHash.outputs.commitHash }}" | tee .commitHash
+          echo "${{ steps.getHash.outputs.commitHash }}" | tee .commitHash-${{ matrix.branch }}
 
       - name: Trigger build
-        if: steps.cacheHash.outputs.cache-hit != 'true'
+        if: steps.getHash.outputs.skip != 'true' && steps.cacheHash.outputs.cache-hit != 'true'
         uses: peter-evans/repository-dispatch@main
         with:
           token: ${{ secrets.ACTIONS_TRIGGER_PAT }}
           event-type: Merlin Source Code Update
-          client-payload: '{"repo_url": "${{ env.REPO_URL }}", "branch": "${{ env.REPO_BRANCH }}"}'
+          client-payload: '{"repo_url": "${{ env.REPO_URL }}", "branch": "${{ matrix.branch }}"}'

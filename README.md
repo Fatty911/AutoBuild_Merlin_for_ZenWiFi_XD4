@@ -30,8 +30,8 @@
 
 ### 2. 自动构建
 
-- **上游更新检查**：`update_checker_for_Merlin.yml` 每 6 小时检查 SWRT-dev/asuswrt-bcm 的 `386` 分支，有更新时自动触发构建（repository_dispatch）
-- **构建工作流内联兜底**：每 12 小时自检一次上游 HEAD，有变化才构建（缓存命中则跳过，不消耗构建时长）
+- **上游更新检查**：`update_checker_for_Merlin.yml` 每 6 小时检查 SWRT-dev/asuswrt-bcm 的 **多个分支**（`386` 当前默认 + `24353`/`master` 388 线——将来若 388 线官方支持 XD4，会被自动发现并触发对应分支构建），有更新时自动触发构建（repository_dispatch，构建工作流按 payload 分支构建）
+- **构建工作流内联兜底**：每 12 小时自检一次上游 386 分支 HEAD，有变化才构建（缓存命中则跳过，不消耗构建时长）
 - 推送修改 `.github/workflows/` 或 `custom_scripts/` 也会触发
 
 ### 3. AI 自动修复（自发现 + 大模型自修复）
