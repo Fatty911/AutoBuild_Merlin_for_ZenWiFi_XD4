@@ -51,7 +51,7 @@ fi
 # shared/prebuild/ 根下的散文件：Makefile 直接引用 prebuild/amas_wgn_shared.o
 # （wildcard amas_wgn_shared.c 失败时）；386 分支只有 RT-AX55 的 prebuild 含该文件
 if [ ! -e "release/src/router/shared/prebuild/amas_wgn_shared.o" ]; then
-  SRC_O=$(find release/src/router/shared/prebuild -maxdepth 2 -name amas_wgn_shared.o 2>/dev/null | head -1)
+  SRC_O=$(find release/src/router/shared/prebuild -name amas_wgn_shared.o 2>/dev/null | head -1)
   if [ -n "$SRC_O" ]; then
     cp -ar "$SRC_O" release/src/router/shared/prebuild/amas_wgn_shared.o
     echo "✅ 已复制 shared/prebuild/amas_wgn_shared.o (来自 $SRC_O)"
