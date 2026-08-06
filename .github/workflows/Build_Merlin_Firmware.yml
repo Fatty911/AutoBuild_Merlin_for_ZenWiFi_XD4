@@ -1,0 +1,309 @@
+name: Build Merlin Firmware for ZenWiFi XD4
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: '构建目标 (rt-ax56_xd4 = XD4 专用配置, rt-ax56u = RT-AX56U)'
+        type: choice
+        default: rt-ax56_xd4
+        options:
+          - rt-ax56_xd4
+          - rt-ax56u
+      branch:
+        description: '上游 SWRT-dev/asuswrt-bcm 分支'
+        type: choice
+        default: '386'
+        options:
+          - '386'
+          - '24353'
+          - 'master'
+  schedule:
+    # 每 12 小时检查一次上游 386 分支是否有更新，有更新才构建（缓存命中则跳过）
+    - cron: '0 */12 * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/Build_Merlin_Firmware.yml'
+      - 'custom_scripts/**'
+
+concurrency:
+  group: build-merlin-firmware
+  cancel-in-progress: true
+
+env:
+  TZ: Asia/Shanghai
+  SOURCE: SWRT_Merlin_386
+  REPO_URL: https://github.com/SWRT-dev/asuswrt-bcm
+  REPO_BRANCH: ${{ inputs.branch || '386' }}
+  SDK_DIR: src-rt-5.02axhnd.675x
+  MODEL: ${{ inputs.model || 'rt-ax56_xd4' }}
+  TOOLCHAIN_BASE: /opt/toolchains
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+    permissions:
+      contents: write
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 4096
+          temp-reserve-mb: 2048
+          swap-size-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 1
+
+      # 定时触发时先查上游 HEAD，无变化直接跳过（避免空跑 2 小时）
+      - name: Check upstream change (scheduled runs only)
+        id: upstream_check
+        if: github.event_name == 'schedule'
+        run: |
+          echo "检查上游 $REPO_URL 分支 $REPO_BRANCH..."
+          UPSTREAM_HASH=$(git ls-remote "$REPO_URL" "refs/heads/$REPO_BRANCH" | awk '{print $1}')
+          echo "upstream_hash=$UPSTREAM_HASH" >> "$GITHUB_OUTPUT"
+          echo "上游 $REPO_BRANCH HEAD: $UPSTREAM_HASH"
+
+      - name: Cache upstream HEAD marker
+        id: upstream_cache
+        if: github.event_name == 'schedule'
+        uses: actions/cache@main
+        with:
+          path: .upstreamHash
+          key: upstream-${{ env.REPO_BRANCH }}-${{ steps.upstream_check.outputs.upstream_hash }}
+
+      - name: Save upstream marker (new hash)
+        if: github.event_name == 'schedule' && steps.upstream_cache.outputs.cache-hit != 'true'
+        run: |
+          echo "${{ steps.upstream_check.outputs.upstream_hash }}" > .upstreamHash
+          echo "已记录新上游 HEAD"
+
+      - name: Skip if upstream unchanged
+        if: github.event_name == 'schedule' && steps.upstream_cache.outputs.cache-hit == 'true'
+        run: |
+          echo "上游 $REPO_BRANCH 无更新，跳过本次构建"
+          exit 0
+
+      - name: Cache APT packages
+        uses: actions/cache@main
+        with:
+          path: |
+            /var/cache/apt/archives
+            /var/lib/apt/lists
+          key: ${{ runner.os }}-apt-merlin-${{ hashFiles('.github/workflows/Build_Merlin_Firmware.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-merlin-
+          save-always: false
+
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo -E apt-get -y purge azure-cli* docker* ghc* llvm* 2>/dev/null || true
+          sudo sed -i 's/^# deb/deb/g' /etc/apt/sources.list || true
+          sudo -E apt-get -qq update || sudo -E apt-get -qq update
+          # swrt-docker (Ubuntu 24.04) 的依赖清单；python2 在 24.04 已移除，跳过
+          sudo apt-get -y install build-essential asciidoc dos2unix libtool-bin cmake libproxy-dev \
+            uuid-dev liblzo2-dev autoconf automake bash bison bzip2 diffutils \
+            file flex m4 g++ gawk groff-base libncurses5-dev libtool libslang2 \
+            make patch perl pkg-config shtool subversion tar texinfo zlib1g \
+            zlib1g-dev git gettext libexpat1-dev libssl-dev cvs gperf unzip \
+            libxml-parser-perl gcc-multilib libxml2-dev g++-multilib \
+            gitk libncurses5 mtd-utils libvorbis-dev autopoint autogen sed \
+            intltool libglib2.0-dev xutils-dev \
+            lib32z1-dev lib32stdc++6 xsltproc gtk-doc-tools libelf-dev \
+            libelf1 libltdl-dev curl nano lzip patchelf \
+            bc rsync sudo xxd binutils libz-dev patch python3 \
+            lib32gcc-s1 libc6-dev-i386 uglifyjs git-core p7zip p7zip-full msmtp \
+            xmlto qemu-utils upx device-tree-compiler antlr3 wget lib32z1 \
+            binutils-dev lzma liblzma-dev lzma-dev libstdc++5 \
+            sharutils gengetopt autoconf-archive libsysfs-dev zip \
+            || sudo apt-get -y install build-essential flex bison gawk git unzip wget patch || exit 1
+          # 32 位库支持（工具链依赖）
+          sudo dpkg --add-architecture i386 2>/dev/null || true
+          sudo -E apt-get -qq update || true
+          # Broadcom 构建系统要求 /bin/sh 是 bash
+          sudo ln -sf /bin/bash /bin/sh
+          sudo -E apt-get -qq clean
+          sudo timedatectl set-timezone "$TZ" || true
+
+      - name: Clone toolchains
+        run: |
+          sudo mkdir -p /opt/toolchains /projects/bca/tools/linux/bin
+          sudo chown -R $USER /opt/toolchains /projects
+          git clone --depth 1 https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd" 2>&1 | tail -1 || \
+            git clone --depth 1 https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd" 2>&1 | tail -1
+          git clone --depth 1 https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm" 2>&1 | tail -1 || \
+            git clone --depth 1 https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm" 2>&1 | tail -1
+
+      - name: Setup toolchains
+        run: |
+          # 与 paldier/swrt-docker 内 envs/bcm.sh 一致
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.3-linux-4.1-glibc-2.24-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-5.3-linux-4.1-glibc-2.24-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-gcc-5.3-linux-4.1-uclibc-1.0.12-glibc-2.24-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-9.2-linux-4.19-glibc-2.30-binutils-2.32 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-9.2-linux-4.19-glibc-2.30-binutils-2.32 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcm"/hndtools-arm-linux-2.6.36-uclibc-4.5.3 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcm"/hndtools-armeabi-2013.11 /projects/bca/tools/linux/
+          ln -sf "$HOME/toolchains/bcm"/fwtag.ini /projects/bca/tools/linux/bin/
+          ln -sf /projects/bca /projects/hnd
+          echo "TOOLCHAIN_BASE=/opt/toolchains" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=/opt/toolchains/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1/usr/lib" >> "$GITHUB_ENV"
+          echo "/opt/toolchains/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1/usr/bin" >> "$GITHUB_PATH"
+          echo "/opt/toolchains/crosstools-aarch64-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1/usr/bin" >> "$GITHUB_PATH"
+          ls -la /opt/toolchains/
+
+      - name: Clone source
+        id: clone_source
+        working-directory: ${{ github.workspace }}
+        run: |
+          df -hT
+          echo "克隆 $REPO_URL 分支 $REPO_BRANCH (浅克隆)..."
+          git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" asuswrt-bcm 2>&1 | tail -3 || \
+            git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" asuswrt-bcm 2>&1 | tail -3
+          echo "source_rev=$(git -C asuswrt-bcm rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "source_rev_short=$(git -C asuswrt-bcm rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify softcenter in source
+        working-directory: ${{ github.workspace }}/asuswrt-bcm
+        run: |
+          if [ -f "release/src/router/softcenter/Softcenter.asp" ] && [ -d "release/src/router/softcenter/softcenter" ]; then
+            echo "✅ 软件中心 (softcenter) 已确认在源码中: release/src/router/softcenter/"
+            echo "SOFTCENTER_PRESENT=true" >> "$GITHUB_ENV"
+          else
+            echo "::error::软件中心源码缺失！release/src/router/softcenter/ 不存在或文件不完整"
+            echo "SOFTCENTER_PRESENT=false" >> "$GITHUB_ENV"
+            exit 1
+          fi
+
+      - name: Build firmware
+        id: build
+        working-directory: ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}
+        env:
+          TERM: dumb
+        run: |
+          echo "=== 构建模型: $MODEL (SDK: $SDK_DIR) ==="
+          echo "=== 磁盘剩余: $(df -h / | tail -1 | awk '{print $4}') ==="
+          set -o pipefail
+          make "$MODEL" > build.log 2>&1 || {
+            echo "首次构建失败，收集错误信息..."
+            tail -n 200 build.log
+            exit 1
+          }
+          echo "=== 构建完成，输出文件 ==="
+          ls -la image/ 2>/dev/null || ls -la
+
+      - name: Compute build info
+        id: build_info
+        run: |
+          cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR"
+          FW_FILE=$(ls image/*.trx 2>/dev/null | grep -E 'RT-AX56_XD4_|RT-AX56U_' | head -1)
+          echo "FW_FILE=$FW_FILE" >> "$GITHUB_ENV"
+          if [ -n "$FW_FILE" ]; then
+            FW_VERSION=$(basename "$FW_FILE" .trx)
+            echo "FW_VERSION=$FW_VERSION" >> "$GITHUB_ENV"
+            echo "找到固件: $FW_FILE"
+          else
+            echo "::error::未找到固件输出"
+            ls -la image/ 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Build Quality Gate
+        id: quality_gate
+        env:
+          SOURCE: ${{ env.SOURCE }}
+          EXPECTED_MODEL_PATTERN: RT-AX56_XD4
+          MIN_FIRMWARE_SIZE_MB: 10
+        run: |
+          if python3 "$GITHUB_WORKSPACE/custom_scripts/validate_build_output.py" --gate; then
+            echo "gate_result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "gate_result=fail" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Generate checksums and info
+        run: |
+          cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR"
+          sha256sum "image/$(basename "$FW_FILE")" > "image/$(basename "$FW_FILE").sha256"
+          {
+            echo "固件: $(basename "$FW_FILE")"
+            echo "来源: $SOURCE"
+            echo "上游: $REPO_URL @ $REPO_BRANCH (${{ steps.clone_source.outputs.source_rev_short }})"
+            echo "构建时间: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %Z')"
+            echo "软件中心: 已集成 (release/src/router/softcenter)"
+            echo "SHA256: $(cat image/$(basename "$FW_FILE").sha256 | awk '{print $1}')"
+          } > firmware-info.txt
+          cp firmware-info.txt "$GITHUB_WORKSPACE/firmware-info.txt"
+          cat "$GITHUB_WORKSPACE/firmware-info.txt"
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@main
+        with:
+          name: Merlin_XD4_${{ env.FW_VERSION }}_${{ github.run_number }}
+          path: |
+            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.trx
+            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.sha256
+            ${{ github.workspace }}/firmware-info.txt
+            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/build.log
+          retention-days: 14
+
+      - name: Publish release
+        id: publish_release
+        if: steps.quality_gate.outputs.gate_result == 'pass'
+        uses: softprops/action-gh-release@master
+        with:
+          files: |
+            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.trx
+            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.sha256
+            ${{ github.workspace }}/firmware-info.txt
+          name: ${{ env.FW_VERSION }}
+          tag_name: Merlin_XD4_${{ env.FW_VERSION }}_${{ github.run_number }}
+          body: |
+            华硕 ZenWiFi XD4 梅林固件 (SWRT/MerlinR 386 分支, 内置软件中心)
+            - 固件: `${{ env.FW_VERSION }}.trx`
+            - 来源: ${{ env.SOURCE }} @ ${{ steps.clone_source.outputs.source_rev_short }}
+            - 软件中心: 已集成，刷机后可安装第三方插件（fancyss 等）
+            - 刷机: 路由器管理页 → 系统管理 → 固件升级 → 选择 .trx 文件
+
+      - name: Cleanup old releases
+        if: steps.publish_release.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 custom_scripts/cleanup_releases.py --prefix "Merlin_XD4_" --keep 3
+
+      - name: Extract Error Log
+        if: failure()
+        run: |
+          python3 custom_scripts/extract_last_error.py --log "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR/build.log" --output last_error.log || true
+          if [ ! -s last_error.log ]; then
+            echo "=== 兜底: 构建日志尾部 ===" > last_error.log
+            tail -n 100 "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR/build.log" >> last_error.log 2>/dev/null || true
+          fi
+
+      - name: Upload Error Log Artifact
+        uses: actions/upload-artifact@main
+        if: failure()
+        with:
+          name: error-log
+          path: last_error.log
+          retention-days: 7

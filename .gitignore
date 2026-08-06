@@ -1,0 +1,8 @@
+# 构建产物与日志不入库
+build.log
+last_error.log
+*.trx
+*.sha256
+asuswrt-bcm/
+toolchains/
+__pycache__/

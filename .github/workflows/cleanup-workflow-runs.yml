@@ -1,0 +1,41 @@
+name: Cleanup Workflow Runs
+
+on:
+  schedule:
+    # 每天 3:00 UTC (11:00 北京时间)
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      keep_per_conclusion:
+        description: '每种结论保留的 run 数'
+        default: '2'
+        required: false
+      dry_run:
+        description: '演练模式（不删除）'
+        type: boolean
+        default: false
+
+env:
+  TZ: Asia/Shanghai
+
+jobs:
+  cleanup-workflow-runs:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@main
+
+      - name: Setup Python
+        uses: actions/setup-python@main
+        with:
+          python-version: '3.12'
+
+      - name: Run workflow cleanup script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_PER_CONCLUSION: ${{ inputs.keep_per_conclusion || '2' }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: |
+          python3 custom_scripts/cleanup_workflow_runs.py
