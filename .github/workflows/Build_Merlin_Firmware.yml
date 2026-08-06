@@ -153,22 +153,34 @@ jobs:
         run: |
           set -o pipefail
           df -h / | tail -1
-          for attempt in 1 2 3; do
-            echo "--- bcmhnd-toolchains (约 600MB) 尝试 $attempt ---"
-            if git clone --depth 1 --single-branch https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd" 2>&1 | tail -3; then
-              break
-            fi
-            rm -rf "$HOME/toolchains/bcmhnd"
-            sleep 5
-          done
-          for attempt in 1 2 3; do
-            echo "--- bcm-toolchains (约 120MB) 尝试 $attempt ---"
-            if git clone --depth 1 --single-branch https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm" 2>&1 | tail -3; then
-              break
-            fi
-            rm -rf "$HOME/toolchains/bcm"
-            sleep 5
-          done
+          # GitHub Actions runner 上 git clone 该仓库 checkout 阶段偶发失败，
+          # 改用 codeload tarball 下载 + 解压（无 checkout 阶段，curl 可重试）
+          fetch_toolchain() {
+            local url="$1" out="$2" dir="$3"
+            mkdir -p "$(dirname "$out")"
+            for attempt in 1 2 3; do
+              echo "--- $dir (尝试 $attempt) ---"
+              rm -rf "$out" "$(dirname "$out")/$dir"
+              if curl -fsSL --retry 3 --connect-timeout 30 -o "$out.tgz" "$url" && tar xzf "$out.tgz" -C "$(dirname "$out")"; then
+                mv "$(dirname "$out")/$dir" "$out"
+                rm -f "$out.tgz"
+                return 0
+              fi
+              rm -f "$out.tgz"
+              sleep 5
+            done
+            return 1
+          }
+          fetch_toolchain \
+            "https://codeload.github.com/SWRT-dev/bcmhnd-toolchains/tar.gz/refs/heads/master" \
+            "$HOME/toolchains/bcmhnd" \
+            "bcmhnd-toolchains-master" \
+            || { echo "::error::bcmhnd-toolchains 下载失败"; exit 1; }
+          fetch_toolchain \
+            "https://codeload.github.com/SWRT-dev/bcm-toolchains/tar.gz/refs/heads/master" \
+            "$HOME/toolchains/bcm" \
+            "bcm-toolchains-master" \
+            || { echo "::error::bcm-toolchains 下载失败"; exit 1; }
           # 验证关键工具链目录存在
           test -d "$HOME/toolchains/bcmhnd/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1" \
             || { echo "::error::bcmhnd 工具链缺失"; exit 1; }
