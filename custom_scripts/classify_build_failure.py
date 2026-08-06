@@ -20,7 +20,8 @@ TRANSIENT_PATTERNS = [
     r"fatal: unable to access|early EOF|index-pack failed|RPC failed|fetch-pack",
     r"Operation timed out|Timeout was reached|ETIMEDOUT|Connection timed out",
     r"429|503|502|Too Many Requests|Service Unavailable|rate limit",
-    r"runner|infrastructure|The runner has exited|self-hosted",
+    # 注意: 不能匹配裸 "runner"（错误日志路径里全是 /home/runner/...）
+    r"The runner has exited|runner lost|self-hosted runner|Runner was (reaped|terminated)|infrastructure error",
     r"no space left on device",
     r"Could not resolve host|Temporary failure in name resolution",
 ]
