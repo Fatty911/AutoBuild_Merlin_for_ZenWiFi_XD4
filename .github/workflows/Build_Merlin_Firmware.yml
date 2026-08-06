@@ -117,26 +117,36 @@ jobs:
           # 32 位库支持（工具链依赖）
           sudo dpkg --add-architecture i386 2>/dev/null || true
           sudo -E apt-get -qq update || sudo -E apt-get -qq update
-          # swrt-docker (Ubuntu 24.04) 的依赖清单；python2 在 24.04 已移除，跳过
-          sudo apt-get -y install build-essential asciidoc dos2unix libtool-bin cmake libproxy-dev \
-            uuid-dev liblzo2-dev autoconf automake bash bison bzip2 diffutils \
-            file flex m4 g++ gawk groff-base libncurses5-dev libtool libslang2 \
-            make patch perl pkg-config shtool subversion tar texinfo zlib1g \
-            zlib1g-dev git gettext libexpat1-dev libssl-dev cvs gperf unzip \
-            libxml-parser-perl gcc-multilib libxml2-dev g++-multilib \
-            gitk libncurses5 mtd-utils libvorbis-dev autopoint autogen sed \
-            intltool libglib2.0-dev xutils-dev \
-            lib32z1-dev lib32stdc++6 xsltproc gtk-doc-tools libelf-dev \
-            libelf1 libltdl-dev curl nano lzip patchelf \
-            bc rsync sudo xxd binutils libz-dev patch python3 \
-            lib32gcc-s1 libc6-dev-i386 uglifyjs git-core p7zip p7zip-full msmtp \
-            xmlto qemu-utils upx device-tree-compiler antlr3 wget lib32z1 \
-            binutils-dev lzma liblzma-dev lzma-dev libstdc++5 \
-            sharutils gengetopt autoconf-archive libsysfs-dev zip \
-            || sudo apt-get -y install build-essential flex bison gawk git unzip wget patch || exit 1
+          # 24.04 包名变化: libncurses5-dev→libncurses-dev, lzma→xz-utils, upx→upx-ucl,
+          # p7zip-full→7zip, git-core→git, python2/gitk/libstdc++5/libelf1/gconf-editor 已移除。
+          # 逐包安装容错，避免一个包缺失导致整批回退到最小集。
+          MISSING=""
+          for pkg in \
+            build-essential flex bison gawk git wget patch unzip texinfo gettext \
+            autoconf automake libtool libtool-bin pkg-config gperf bzip2 xz-utils \
+            make m4 perl python3 python3-pip rsync bc file cmake \
+            g++-multilib gcc-multilib libncurses-dev zlib1g-dev libssl-dev \
+            liblzo2-dev uuid-dev libelf-dev libxml2-dev libglib2.0-dev libltdl-dev \
+            libexpat1-dev libvorbis-dev lib32z1-dev lib32stdc++6 lib32gcc-s1 \
+            libc6-dev-i386 xsltproc gtk-doc-tools intltool autopoint autogen \
+            autoconf-archive sharutils dos2unix 7zip msmtp xmlto qemu-utils \
+            upx-ucl device-tree-compiler antlr3 lzip patchelf libproxy-dev \
+            gengetopt binutils-dev curl zip sudo xxd binutils libz-dev libslang2 \
+            groff-base diffutils sed mtd-utils subversion asciidoc libncurses5-dev; do
+            if ! sudo apt-get install -y "$pkg" >/dev/null 2>&1; then
+              echo "⚠️ 包不可用(跳过): $pkg"
+              MISSING="$MISSING $pkg"
+            fi
+          done
+          sudo -E apt-get -qq clean
+          # 关键包验证（缺失即失败，绝不带缺依赖进编译）
+          for must in build-essential flex bison gawk git liblzo2-dev libncurses-dev zlib1g-dev libssl-dev; do
+            dpkg -s "$must" >/dev/null 2>&1 || { echo "::error::关键依赖未安装: $must"; exit 1; }
+          done
           # Broadcom 构建系统要求 /bin/sh 是 bash
           sudo ln -sf /bin/bash /bin/sh
-          sudo -E apt-get -qq clean
+          test -f /usr/include/lzo/lzo1x.h || { echo "::error::lzo1x.h 缺失"; exit 1; }
+          echo "依赖安装完成。不可用包: $MISSING"
           sudo timedatectl set-timezone "$TZ" || true
 
       - name: Clone toolchains
@@ -164,10 +174,8 @@ jobs:
           ln -sf "$HOME/toolchains/bcm"/hndtools-armeabi-2013.11 /projects/bca/tools/linux/
           ln -sf "$HOME/toolchains/bcm"/fwtag.ini /projects/bca/tools/linux/bin/
           ln -sf /projects/bca /projects/hnd
+          # 与 paldier/swrt-docker 一致: 只设 TOOLCHAIN_BASE，工具链 PATH 由构建系统自身管理
           echo "TOOLCHAIN_BASE=/opt/toolchains" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=/opt/toolchains/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1/usr/lib" >> "$GITHUB_ENV"
-          echo "/opt/toolchains/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1/usr/bin" >> "$GITHUB_PATH"
-          echo "/opt/toolchains/crosstools-aarch64-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1/usr/bin" >> "$GITHUB_PATH"
           ls -la /opt/toolchains/
 
       - name: Clone source
