@@ -110,9 +110,12 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          # 注意: ubuntu-24.04 的 apt 源是 /etc/apt/sources.list.d/ubuntu.sources (deb822)，
+          # 不能删除 sources.list.d，否则所有包都 "Unable to locate"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo -E apt-get -y purge azure-cli* docker* ghc* llvm* 2>/dev/null || true
-          sudo sed -i 's/^# deb/deb/g' /etc/apt/sources.list || true
+          # 32 位库支持（工具链依赖）
+          sudo dpkg --add-architecture i386 2>/dev/null || true
           sudo -E apt-get -qq update || sudo -E apt-get -qq update
           # swrt-docker (Ubuntu 24.04) 的依赖清单；python2 在 24.04 已移除，跳过
           sudo apt-get -y install build-essential asciidoc dos2unix libtool-bin cmake libproxy-dev \
@@ -131,9 +134,6 @@ jobs:
             binutils-dev lzma liblzma-dev lzma-dev libstdc++5 \
             sharutils gengetopt autoconf-archive libsysfs-dev zip \
             || sudo apt-get -y install build-essential flex bison gawk git unzip wget patch || exit 1
-          # 32 位库支持（工具链依赖）
-          sudo dpkg --add-architecture i386 2>/dev/null || true
-          sudo -E apt-get -qq update || true
           # Broadcom 构建系统要求 /bin/sh 是 bash
           sudo ln -sf /bin/bash /bin/sh
           sudo -E apt-get -qq clean
