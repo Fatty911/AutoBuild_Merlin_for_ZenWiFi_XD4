@@ -122,18 +122,29 @@ jobs:
 
       - name: Download prepared environment
         if: steps.locate_prep.outputs.prep_run_id != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
+        uses: actions/download-artifact@main
+        with:
+          name: prep-env
+          path: prep
+          run-id: ${{ steps.locate_prep.outputs.prep_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Restore prepared environment
+        if: steps.locate_prep.outputs.prep_run_id != ''
         run: |
-          gh run download "${{ steps.locate_prep.outputs.prep_run_id }}" -n prep-env -D prep 2>&1 | tail -2 || true
           if [ -f prep/prep-env.tgz ]; then
             echo "✅ 已下载 prep-env.tgz ($(ls -lh prep/prep-env.tgz | awk '{print $5}'))"
             tar xzf prep/prep-env.tgz -C "$HOME" toolchains 2>/dev/null || true
             tar xzf prep/prep-env.tgz -C "$GITHUB_WORKSPACE" asuswrt-bcm prep-source-rev.txt 2>/dev/null || true
-            echo "PREP_RESTORED=true" >> "$GITHUB_ENV"
-            echo "source_rev=$(cat prep-source-rev.txt 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
+            if [ -d "$HOME/toolchains/bcmhnd" ] && [ -d "$GITHUB_WORKSPACE/asuswrt-bcm" ]; then
+              echo "PREP_RESTORED=true" >> "$GITHUB_ENV"
+              echo "source_rev=$(cat prep-source-rev.txt 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
+              echo "✅ 环境恢复成功"
+            else
+              echo "::warning::环境恢复不完整，将走全量准备路径"
+            fi
           else
-            echo "::warning::prep-env artifact 下载失败，将走全量准备路径"
+            echo "::warning::prep-env.tgz 不存在，将走全量准备路径"
           fi
 
       # ===== 全量准备路径（无 prep artifact 时兜底）=====
