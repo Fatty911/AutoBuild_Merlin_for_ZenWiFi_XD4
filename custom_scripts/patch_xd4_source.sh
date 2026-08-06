@@ -48,6 +48,16 @@ if [ ! -e "$RSDIR/hostTools/prebuilt/RT-AX56_XD4/addvtoken" ]; then
   echo "✅ 已复制 prebuilt/RT-AX56_XD4/addvtoken (来自 RT-AX56U)"
 fi
 
+# 通用: 为 RT-AX56_XD4 补齐所有按机型的 prebuild 目录（如 protect_srv/lib/prebuild、
+# bwdpi_source/prebuild 等私有预编译库；XD4 与 RT-AX56U 同平台 BCM6755，产物兼容）
+while IFS= read -r d; do
+  if [ -d "$d/RT-AX56U" ] && [ ! -e "$d/RT-AX56_XD4" ]; then
+    cp -ar "$d/RT-AX56U" "$d/RT-AX56_XD4"
+    echo "✅ prebuild 补齐: $d/RT-AX56U → RT-AX56_XD4"
+  fi
+done < <(find release/src/router -maxdepth 4 -type d -name prebuild 2>/dev/null)
+find release/src/router -maxdepth 4 -type d -name prebuild -exec test -d '{}/RT-AX56_XD4' \; -print 2>/dev/null | head -5 | xargs -I{} echo "  prebuild 存在: {}" || true
+
 echo "=== 验证 ==="
 grep -c "RT-AX56_XD4" "$TARGET_MAK" | xargs echo "RT-AX56_XD4 出现次数:"
 ls -d "$RSDIR/router-sysdep.rt-ax56_xd4" >/dev/null && echo "router-sysdep.rt-ax56_xd4: OK"
