@@ -75,7 +75,7 @@ jobs:
             autoconf-archive sharutils dos2unix 7zip msmtp xmlto qemu-utils \
             upx-ucl device-tree-compiler antlr3 lzip patchelf libproxy-dev \
             gengetopt binutils-dev curl zip sudo xxd binutils libz-dev libslang2 \
-            groff-base diffutils sed mtd-utils subversion asciidoc libncurses5-dev; do
+            groff-base diffutils sed mtd-utils subversion asciidoc libncurses5-dev pigz; do
             if ! sudo apt-get install -y "$pkg" >/dev/null 2>&1; then
               echo "⚠️ 包不可用(跳过): $pkg"
               MISSING="$MISSING $pkg"
@@ -186,11 +186,14 @@ jobs:
 
       - name: Package prepared environment
         run: |
-          # 打包工具链 + 补丁后源码（不含 .git，rev 记录在版本文件）
+          # 打包工具链 + 补丁后源码（不含 .git，rev 记录在版本文件）。
+          # 用 pigz 并行压缩（单线程 gzip 压 2.4GB 要 15 分钟+）
           echo "${{ steps.clone_source.outputs.source_rev }}" > prep-source-rev.txt
-          tar czf prep-env.tgz \
-            -C "$HOME" toolchains \
-            -C "$GITHUB_WORKSPACE" asuswrt-bcm prep-source-rev.txt
+          if command -v pigz >/dev/null 2>&1; then
+            tar cf - -C "$HOME" toolchains -C "$GITHUB_WORKSPACE" asuswrt-bcm prep-source-rev.txt | pigz -p 2 > prep-env.tgz
+          else
+            tar czf prep-env.tgz -C "$HOME" toolchains -C "$GITHUB_WORKSPACE" asuswrt-bcm prep-source-rev.txt
+          fi
           ls -lh prep-env.tgz | awk '{print "prep-env.tgz: "$5}'
 
       - name: Upload prepared environment
