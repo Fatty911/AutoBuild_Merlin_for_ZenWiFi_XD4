@@ -151,15 +151,35 @@ jobs:
 
       - name: Clone toolchains
         run: |
-          sudo mkdir -p /opt/toolchains /projects/bca/tools/linux/bin
-          sudo chown -R $USER /opt/toolchains /projects
-          git clone --depth 1 https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd" 2>&1 | tail -1 || \
-            git clone --depth 1 https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd" 2>&1 | tail -1
-          git clone --depth 1 https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm" 2>&1 | tail -1 || \
-            git clone --depth 1 https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm" 2>&1 | tail -1
+          set -o pipefail
+          df -h / | tail -1
+          for attempt in 1 2 3; do
+            echo "--- bcmhnd-toolchains (约 600MB) 尝试 $attempt ---"
+            if git clone --depth 1 --single-branch https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd" 2>&1 | tail -3; then
+              break
+            fi
+            rm -rf "$HOME/toolchains/bcmhnd"
+            sleep 5
+          done
+          for attempt in 1 2 3; do
+            echo "--- bcm-toolchains (约 120MB) 尝试 $attempt ---"
+            if git clone --depth 1 --single-branch https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm" 2>&1 | tail -3; then
+              break
+            fi
+            rm -rf "$HOME/toolchains/bcm"
+            sleep 5
+          done
+          # 验证关键工具链目录存在
+          test -d "$HOME/toolchains/bcmhnd/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1" \
+            || { echo "::error::bcmhnd 工具链缺失"; exit 1; }
+          test -d "$HOME/toolchains/bcm/hndtools-arm-linux-2.6.36-uclibc-4.5.3" \
+            || { echo "::error::bcm 工具链缺失"; exit 1; }
+          du -sh "$HOME/toolchains/bcmhnd" "$HOME/toolchains/bcm"
 
       - name: Setup toolchains
         run: |
+          sudo mkdir -p /opt/toolchains /projects/bca/tools/linux/bin
+          sudo chown -R $USER /opt/toolchains /projects
           # 与 paldier/swrt-docker 内 envs/bcm.sh 一致
           ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
           ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
@@ -182,10 +202,18 @@ jobs:
         id: clone_source
         working-directory: ${{ github.workspace }}
         run: |
-          df -hT
-          echo "克隆 $REPO_URL 分支 $REPO_BRANCH (浅克隆)..."
-          git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" asuswrt-bcm 2>&1 | tail -3 || \
-            git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" asuswrt-bcm 2>&1 | tail -3
+          set -o pipefail
+          df -hT | tail -3
+          echo "克隆 $REPO_URL 分支 $REPO_BRANCH (浅克隆, 约 1.7GB)..."
+          for attempt in 1 2 3; do
+            echo "--- 尝试 $attempt ---"
+            if git clone --depth 1 --single-branch --branch "$REPO_BRANCH" "$REPO_URL" asuswrt-bcm 2>&1 | tail -3; then
+              break
+            fi
+            rm -rf asuswrt-bcm
+            sleep 5
+          done
+          test -d asuswrt-bcm/.git || { echo "::error::源码克隆失败"; exit 1; }
           echo "source_rev=$(git -C asuswrt-bcm rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "source_rev_short=$(git -C asuswrt-bcm rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
