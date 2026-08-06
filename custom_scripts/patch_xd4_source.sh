@@ -68,6 +68,13 @@ while IFS= read -r d; do
     echo "✅ prebuild 补齐: $d/RT-AX56U → RT-AX56_XD4"
   fi
 done < <(find release/src/router -maxdepth 4 -type d -name prebuild 2>/dev/null)
+
+# 双保险: amas_wgn_shared.o 也放进 RT-AX56_XD4 镜像目录
+# （RT-AX56U 的 shared prebuild 缺该文件，从 RT-AX55 补；防止 make 解析路径差异）
+if [ -e "release/src/router/shared/prebuild/RT-AX55/amas_wgn_shared.o" ] && [ ! -e "release/src/router/shared/prebuild/RT-AX56_XD4/amas_wgn_shared.o" ]; then
+  cp -ar "release/src/router/shared/prebuild/RT-AX55/amas_wgn_shared.o" "release/src/router/shared/prebuild/RT-AX56_XD4/amas_wgn_shared.o"
+  echo "✅ 双保险: RT-AX56_XD4/amas_wgn_shared.o 已补齐"
+fi
 find release/src/router -maxdepth 4 -type d -name prebuild -exec test -d '{}/RT-AX56_XD4' \; -print 2>/dev/null | head -5 | xargs -I{} echo "  prebuild 存在: {}" || true
 
 echo "=== 验证 ==="

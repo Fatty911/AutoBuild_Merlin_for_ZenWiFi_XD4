@@ -264,6 +264,12 @@ jobs:
           # 构建系统的 get_extendno 等目标内部调用 git log，必须配置身份
           git config --global user.name "Fatty911"
           git config --global user.email "xuerui911@gmail.com"
+          echo "=== 诊断: shared/prebuild 文件状态 ==="
+          ls -la "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/shared/prebuild/" | head -20
+          echo "--- RT-AX56_XD4 目录 ---"
+          ls "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/shared/prebuild/RT-AX56_XD4/" 2>/dev/null | head -20
+          echo "--- 根下散 .o ---"
+          ls "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/shared/prebuild/"*.o 2>/dev/null || echo "(根下无散 .o)"
           echo "=== 构建模型: $MODEL (SDK: $SDK_DIR) ==="
           echo "=== 磁盘剩余: $(df -h / | tail -1 | awk '{print $4}') ==="
           set -o pipefail
@@ -361,6 +367,7 @@ jobs:
         if: failure()
         run: |
           python3 custom_scripts/extract_last_error.py --log "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR/build.log" --output last_error.log || true
+          tail -n 5000 "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR/build.log" > build-tail.log 2>/dev/null || true
           if [ ! -s last_error.log ]; then
             echo "=== 兜底: 构建日志尾部 ===" > last_error.log
             tail -n 100 "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR/build.log" >> last_error.log 2>/dev/null || true
@@ -371,5 +378,7 @@ jobs:
         if: failure()
         with:
           name: error-log
-          path: last_error.log
+          path: |
+            last_error.log
+            build-tail.log
           retention-days: 7
