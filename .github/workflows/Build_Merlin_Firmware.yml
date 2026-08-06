@@ -18,17 +18,18 @@ on:
           - '386'
           - '24353'
           - 'master'
+      use_prepared_env:
+        description: '使用 Prepare 工作流打包的环境（默认 true，false 则全量准备）'
+        type: boolean
+        default: true
+  workflow_run:
+    workflows: ["Prepare Build Environment"]
+    types: [completed]
   repository_dispatch:
     types: [Merlin Source Code Update]
   schedule:
     # 每 12 小时检查一次上游 386 分支是否有更新，有更新才构建（缓存命中则跳过）
     - cron: '0 */12 * * *'
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/Build_Merlin_Firmware.yml'
-      - 'custom_scripts/**'
 
 concurrency:
   group: build-merlin-firmware
@@ -97,32 +98,53 @@ jobs:
           echo "上游 $REPO_BRANCH 无更新，跳过本次构建"
           exit 0
 
-      - name: Cache APT packages
-        uses: actions/cache@main
-        with:
-          path: |
-            /var/cache/apt/archives
-            /var/lib/apt/lists
-          key: ${{ runner.os }}-apt-merlin-${{ hashFiles('.github/workflows/Build_Merlin_Firmware.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-apt-merlin-
-          save-always: false
+      # ===== 获取准备产物（工具链 + 补丁后源码）=====
+      - name: Locate prepared environment artifact
+        id: locate_prep
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            PREP_RUN_ID="${{ github.event.workflow_run.id }}"
+            echo "workflow_run 触发，使用 Prepare run #$PREP_RUN_ID"
+          else
+            # 手动/定时/dispatch: 找最新成功的 Prepare run
+            PREP_RUN_ID=$(gh api "repos/${{ github.repository }}/actions/workflows/Prepare_Build_Environment.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].id' 2>/dev/null)
+            if [ -z "$PREP_RUN_ID" ] || [ "$PREP_RUN_ID" = "null" ]; then
+              echo "::warning::没有成功的 Prepare run，将走全量准备路径"
+              echo "prep_run_id=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "使用最近成功的 Prepare run #$PREP_RUN_ID"
+          fi
+          echo "prep_run_id=$PREP_RUN_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Install dependencies
+      - name: Download prepared environment
+        if: steps.locate_prep.outputs.prep_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ steps.locate_prep.outputs.prep_run_id }}" -n prep-env -D prep 2>&1 | tail -2 || true
+          if [ -f prep/prep-env.tgz ]; then
+            echo "✅ 已下载 prep-env.tgz ($(ls -lh prep/prep-env.tgz | awk '{print $5}'))"
+            tar xzf prep/prep-env.tgz -C "$HOME" toolchains 2>/dev/null || true
+            tar xzf prep/prep-env.tgz -C "$GITHUB_WORKSPACE" asuswrt-bcm prep-source-rev.txt 2>/dev/null || true
+            echo "PREP_RESTORED=true" >> "$GITHUB_ENV"
+            echo "source_rev=$(cat prep-source-rev.txt 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::prep-env artifact 下载失败，将走全量准备路径"
+          fi
+
+      # ===== 全量准备路径（无 prep artifact 时兜底）=====
+      - name: Install dependencies (fallback)
+        if: env.PREP_RESTORED != 'true'
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          # 注意: ubuntu-24.04 的 apt 源是 /etc/apt/sources.list.d/ubuntu.sources (deb822)，
-          # 不能删除 sources.list.d，否则所有包都 "Unable to locate"
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo -E apt-get -y purge azure-cli* docker* ghc* llvm* 2>/dev/null || true
-          # 32 位库支持（工具链依赖）
           sudo dpkg --add-architecture i386 2>/dev/null || true
           sudo -E apt-get -qq update || sudo -E apt-get -qq update
-          # 24.04 包名变化: libncurses5-dev→libncurses-dev, lzma→xz-utils, upx→upx-ucl,
-          # p7zip-full→7zip, git-core→git, python2/gitk/libstdc++5/libelf1/gconf-editor 已移除。
-          # 逐包安装容错，避免一个包缺失导致整批回退到最小集。
-          MISSING=""
           for pkg in \
             build-essential flex bison gawk git wget patch unzip texinfo gettext \
             autoconf automake libtool libtool-bin pkg-config gperf bzip2 xz-utils \
@@ -135,73 +157,63 @@ jobs:
             upx-ucl device-tree-compiler antlr3 lzip patchelf libproxy-dev \
             gengetopt binutils-dev curl zip sudo xxd binutils libz-dev libslang2 \
             groff-base diffutils sed mtd-utils subversion asciidoc libncurses5-dev; do
-            if ! sudo apt-get install -y "$pkg" >/dev/null 2>&1; then
-              echo "⚠️ 包不可用(跳过): $pkg"
-              MISSING="$MISSING $pkg"
-            fi
+            sudo apt-get install -y "$pkg" >/dev/null 2>&1 || echo "跳过: $pkg"
           done
-          sudo -E apt-get -qq clean
-          # 关键包验证（缺失即失败，绝不带缺依赖进编译）
           for must in build-essential flex bison gawk git liblzo2-dev libncurses-dev zlib1g-dev libssl-dev; do
             dpkg -s "$must" >/dev/null 2>&1 || { echo "::error::关键依赖未安装: $must"; exit 1; }
           done
-          # Broadcom 构建系统要求 /bin/sh 是 bash
           sudo ln -sf /bin/bash /bin/sh
           test -f /usr/include/lzo/lzo1x.h || { echo "::error::lzo1x.h 缺失"; exit 1; }
-          echo "依赖安装完成。不可用包: $MISSING"
-          sudo timedatectl set-timezone "$TZ" || true
 
-      - name: Fetch bcmhnd toolchains
+      - name: Fetch toolchains (fallback)
+        if: env.PREP_RESTORED != 'true'
         run: |
           set -o pipefail
-          echo "STEP_START $(date -u +%H:%M:%S) | $(df -h / | tail -1)"
-          # git clone --no-checkout + git archive 绕开 checkout 阶段（runner 上该仓库 checkout 失败），
-          # 传输仍走 github.com（已验证可用）。分步骤执行缩小故障面。
           mkdir -p "$HOME/toolchains"
           for attempt in 1 2 3; do
-            echo "--- 尝试 $attempt ---"
-            rm -rf "$HOME/toolchains/bcmhnd"
             if git clone --depth 1 --no-checkout --single-branch \
-                https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd" 2>&1 | tee /tmp/clone-bcmhnd.log | tail -3 \
-               && git -C "$HOME/toolchains/bcmhnd" archive --format=tar HEAD 2>>/tmp/clone-bcmhnd.log | tar x -C "$HOME/toolchains/bcmhnd"; then
-              rm -rf "$HOME/toolchains/bcmhnd/.git"
-              echo "STEP_END bcmhnd OK $(du -sh "$HOME/toolchains/bcmhnd" | awk '{print $1}')"
-              break
+                https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd" 2>&1 | tail -2 \
+               && git -C "$HOME/toolchains/bcmhnd" archive --format=tar HEAD 2>/dev/null | tar x -C "$HOME/toolchains/bcmhnd"; then
+              rm -rf "$HOME/toolchains/bcmhnd/.git"; break
             fi
-            echo "--- 失败，日志尾部: ---"
-            tail -8 /tmp/clone-bcmhnd.log
-            sleep 5
+            rm -rf "$HOME/toolchains/bcmhnd"; sleep 5
+          done
+          for attempt in 1 2 3; do
+            if git clone --depth 1 --no-checkout --single-branch \
+                https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm" 2>&1 | tail -2 \
+               && git -C "$HOME/toolchains/bcm" archive --format=tar HEAD 2>/dev/null | tar x -C "$HOME/toolchains/bcm"; then
+              rm -rf "$HOME/toolchains/bcm/.git"; break
+            fi
+            rm -rf "$HOME/toolchains/bcm"; sleep 5
           done
           test -d "$HOME/toolchains/bcmhnd/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1" \
             || { echo "::error::bcmhnd 工具链缺失"; exit 1; }
-
-      - name: Fetch bcm toolchains
-        run: |
-          set -o pipefail
-          echo "STEP_START $(date -u +%H:%M:%S) | $(df -h / | tail -1)"
-          mkdir -p "$HOME/toolchains"
-          for attempt in 1 2 3; do
-            echo "--- 尝试 $attempt ---"
-            rm -rf "$HOME/toolchains/bcm"
-            if git clone --depth 1 --no-checkout --single-branch \
-                https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm" 2>&1 | tee /tmp/clone-bcm.log | tail -3 \
-               && git -C "$HOME/toolchains/bcm" archive --format=tar HEAD 2>>/tmp/clone-bcm.log | tar x -C "$HOME/toolchains/bcm"; then
-              rm -rf "$HOME/toolchains/bcm/.git"
-              echo "STEP_END bcm OK $(du -sh "$HOME/toolchains/bcm" | awk '{print $1}')"
-              break
-            fi
-            echo "--- 失败，日志尾部: ---"
-            tail -8 /tmp/clone-bcm.log
-            sleep 5
-          done
           test -d "$HOME/toolchains/bcm/hndtools-arm-linux-2.6.36-uclibc-4.5.3" \
             || { echo "::error::bcm 工具链缺失"; exit 1; }
+
+      - name: Clone source (fallback)
+        if: env.PREP_RESTORED != 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            if git clone --depth 1 --single-branch --branch "$REPO_BRANCH" "$REPO_URL" asuswrt-bcm 2>&1 | tail -2; then
+              break
+            fi
+            rm -rf asuswrt-bcm; sleep 5
+          done
+          test -d asuswrt-bcm/.git || { echo "::error::源码克隆失败"; exit 1; }
+
+      - name: Patch source for XD4 (fallback)
+        if: env.PREP_RESTORED != 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          bash "$GITHUB_WORKSPACE/custom_scripts/patch_xd4_source.sh" "$GITHUB_WORKSPACE/asuswrt-bcm"
 
       - name: Setup toolchains
         run: |
           sudo mkdir -p /opt/toolchains /projects/bca/tools/linux/bin
           sudo chown -R $USER /opt/toolchains /projects
-          # 与 paldier/swrt-docker 内 envs/bcm.sh 一致
           ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
           ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
           ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.3-linux-4.1-glibc-2.24-binutils-2.25 /opt/toolchains/
@@ -215,45 +227,39 @@ jobs:
           ln -sf "$HOME/toolchains/bcm"/hndtools-armeabi-2013.11 /projects/bca/tools/linux/
           ln -sf "$HOME/toolchains/bcm"/fwtag.ini /projects/bca/tools/linux/bin/
           ln -sf /projects/bca /projects/hnd
-          # 与 paldier/swrt-docker 一致: 只设 TOOLCHAIN_BASE，工具链 PATH 由构建系统自身管理
           echo "TOOLCHAIN_BASE=/opt/toolchains" >> "$GITHUB_ENV"
-          ls -la /opt/toolchains/
-
-      - name: Clone source
-        id: clone_source
-        working-directory: ${{ github.workspace }}
-        run: |
-          set -o pipefail
-          df -hT | tail -3
-          echo "克隆 $REPO_URL 分支 $REPO_BRANCH (浅克隆, 约 1.7GB)..."
-          for attempt in 1 2 3; do
-            echo "--- 尝试 $attempt ---"
-            if git clone --depth 1 --single-branch --branch "$REPO_BRANCH" "$REPO_URL" asuswrt-bcm 2>&1 | tail -3; then
-              break
-            fi
-            rm -rf asuswrt-bcm
-            sleep 5
-          done
-          test -d asuswrt-bcm/.git || { echo "::error::源码克隆失败"; exit 1; }
-          echo "source_rev=$(git -C asuswrt-bcm rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "source_rev_short=$(git -C asuswrt-bcm rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Patch source for XD4 (386 branch model definitions)
-        working-directory: ${{ github.workspace }}
-        run: |
-          bash "$GITHUB_WORKSPACE/custom_scripts/patch_xd4_source.sh" "$GITHUB_WORKSPACE/asuswrt-bcm"
+          ls /opt/toolchains/ | wc -l | xargs echo "toolchain links:"
 
       - name: Verify softcenter in source
         working-directory: ${{ github.workspace }}/asuswrt-bcm
         run: |
           if [ -f "release/src/router/softcenter/Softcenter.asp" ] && [ -d "release/src/router/softcenter/softcenter" ]; then
-            echo "✅ 软件中心 (softcenter) 已确认在源码中: release/src/router/softcenter/"
-            echo "SOFTCENTER_PRESENT=true" >> "$GITHUB_ENV"
+            echo "✅ 软件中心已确认在源码中"
           else
-            echo "::error::软件中心源码缺失！release/src/router/softcenter/ 不存在或文件不完整"
-            echo "SOFTCENTER_PRESENT=false" >> "$GITHUB_ENV"
+            echo "::error::软件中心源码缺失！"
             exit 1
           fi
+
+      # ===== 内核构建目录增量缓存（key 含上游 commit，源码变化自动失效）=====
+      - name: Compute source revision
+        id: source_rev
+        run: |
+          if [ -f prep-source-rev.txt ]; then
+            REV=$(cat prep-source-rev.txt)
+          else
+            REV=$(git -C asuswrt-bcm rev-parse HEAD 2>/dev/null || echo unknown)
+          fi
+          echo "source_rev=$REV" >> "$GITHUB_OUTPUT"
+          echo "source_rev_short=${REV:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache kernel build directory
+        uses: actions/cache@main
+        with:
+          path: ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/bcmdrivers/broadcom/net/wl/impl69/main/src/linux/linux-4.1
+          key: merlin-kernel-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}
+          restore-keys: |
+            merlin-kernel-${{ env.REPO_BRANCH }}-
+          save-always: false
 
       - name: Build firmware
         id: build
@@ -264,12 +270,6 @@ jobs:
           # 构建系统的 get_extendno 等目标内部调用 git log，必须配置身份
           git config --global user.name "Fatty911"
           git config --global user.email "xuerui911@gmail.com"
-          echo "=== 诊断: shared/prebuild 文件状态 ==="
-          ls -la "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/shared/prebuild/" | head -20
-          echo "--- RT-AX56_XD4 目录 ---"
-          ls "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/shared/prebuild/RT-AX56_XD4/" 2>/dev/null | head -20
-          echo "--- 根下散 .o ---"
-          ls "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/shared/prebuild/"*.o 2>/dev/null || echo "(根下无散 .o)"
           echo "=== 构建模型: $MODEL (SDK: $SDK_DIR) ==="
           echo "=== 磁盘剩余: $(df -h / | tail -1 | awk '{print $4}') ==="
           set -o pipefail
@@ -341,7 +341,7 @@ jobs:
           {
             echo "固件: $(basename "$FW_FILE")"
             echo "来源: $SOURCE"
-            echo "上游: $REPO_URL @ $REPO_BRANCH (${{ steps.clone_source.outputs.source_rev_short }})"
+            echo "上游: $REPO_URL @ $REPO_BRANCH (${{ steps.source_rev.outputs.source_rev_short }})"
             echo "构建时间: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %Z')"
             echo "软件中心: 已集成 (release/src/router/softcenter)"
             echo "SHA256: $(cat image/$(basename "$FW_FILE").sha256 | awk '{print $1}')"
@@ -374,7 +374,7 @@ jobs:
           body: |
             华硕 ZenWiFi XD4 梅林固件 (SWRT/MerlinR 386 分支, 内置软件中心)
             - 固件: `${{ env.FW_VERSION }}.trx`
-            - 来源: ${{ env.SOURCE }} @ ${{ steps.clone_source.outputs.source_rev_short }}
+            - 来源: ${{ env.SOURCE }} @ ${{ steps.source_rev.outputs.source_rev_short }}
             - 软件中心: 已集成，刷机后可安装第三方插件（fancyss 等）
             - 刷机: 路由器管理页 → 系统管理 → 固件升级 → 选择 .trx 文件
 

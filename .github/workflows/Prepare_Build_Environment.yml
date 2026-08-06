@@ -1,0 +1,201 @@
+name: Prepare Build Environment
+run-name: "Prepare (准备构建环境)"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/Build_Merlin_Firmware.yml'
+      - '.github/workflows/Prepare_Build_Environment.yml'
+      - 'custom_scripts/**'
+
+concurrency:
+  group: prepare-merlin-env
+  cancel-in-progress: true
+
+env:
+  TZ: Asia/Shanghai
+  REPO_URL: https://github.com/SWRT-dev/asuswrt-bcm
+  REPO_BRANCH: ${{ github.event.client_payload.branch || inputs.branch || '386' }}
+  TOOLCHAIN_BASE: /opt/toolchains
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 4096
+          temp-reserve-mb: 2048
+          swap-size-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 1
+
+      - name: Cache APT packages
+        uses: actions/cache@main
+        with:
+          path: |
+            /var/cache/apt/archives
+            /var/lib/apt/lists
+          key: ${{ runner.os }}-apt-merlin-${{ hashFiles('.github/workflows/Prepare_Build_Environment.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-merlin-
+          save-always: false
+
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          # ubuntu-24.04: 源在 sources.list.d/ubuntu.sources (deb822)，不能删除
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo -E apt-get -y purge azure-cli* docker* ghc* llvm* 2>/dev/null || true
+          sudo dpkg --add-architecture i386 2>/dev/null || true
+          sudo -E apt-get -qq update || sudo -E apt-get -qq update
+          MISSING=""
+          for pkg in \
+            build-essential flex bison gawk git wget patch unzip texinfo gettext \
+            autoconf automake libtool libtool-bin pkg-config gperf bzip2 xz-utils \
+            make m4 perl python3 python3-pip rsync bc file cmake \
+            g++-multilib gcc-multilib libncurses-dev zlib1g-dev libssl-dev \
+            liblzo2-dev uuid-dev libelf-dev libxml2-dev libglib2.0-dev libltdl-dev \
+            libexpat1-dev libvorbis-dev lib32z1-dev lib32stdc++6 lib32gcc-s1 \
+            libc6-dev-i386 xsltproc gtk-doc-tools intltool autopoint autogen \
+            autoconf-archive sharutils dos2unix 7zip msmtp xmlto qemu-utils \
+            upx-ucl device-tree-compiler antlr3 lzip patchelf libproxy-dev \
+            gengetopt binutils-dev curl zip sudo xxd binutils libz-dev libslang2 \
+            groff-base diffutils sed mtd-utils subversion asciidoc libncurses5-dev; do
+            if ! sudo apt-get install -y "$pkg" >/dev/null 2>&1; then
+              echo "⚠️ 包不可用(跳过): $pkg"
+              MISSING="$MISSING $pkg"
+            fi
+          done
+          sudo -E apt-get -qq clean
+          for must in build-essential flex bison gawk git liblzo2-dev libncurses-dev zlib1g-dev libssl-dev; do
+            dpkg -s "$must" >/dev/null 2>&1 || { echo "::error::关键依赖未安装: $must"; exit 1; }
+          done
+          sudo ln -sf /bin/bash /bin/sh
+          test -f /usr/include/lzo/lzo1x.h || { echo "::error::lzo1x.h 缺失"; exit 1; }
+          echo "依赖安装完成。不可用包: $MISSING"
+          sudo timedatectl set-timezone "$TZ" || true
+
+      - name: Fetch bcmhnd toolchains
+        run: |
+          set -o pipefail
+          echo "STEP_START $(date -u +%H:%M:%S) | $(df -h / | tail -1)"
+          mkdir -p "$HOME/toolchains"
+          for attempt in 1 2 3; do
+            echo "--- 尝试 $attempt ---"
+            rm -rf "$HOME/toolchains/bcmhnd"
+            if git clone --depth 1 --no-checkout --single-branch \
+                https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd" 2>&1 | tee /tmp/clone-bcmhnd.log | tail -3 \
+               && git -C "$HOME/toolchains/bcmhnd" archive --format=tar HEAD 2>>/tmp/clone-bcmhnd.log | tar x -C "$HOME/toolchains/bcmhnd"; then
+              rm -rf "$HOME/toolchains/bcmhnd/.git"
+              echo "STEP_END bcmhnd OK $(du -sh "$HOME/toolchains/bcmhnd" | awk '{print $1}')"
+              break
+            fi
+            tail -8 /tmp/clone-bcmhnd.log
+            sleep 5
+          done
+          test -d "$HOME/toolchains/bcmhnd/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1" \
+            || { echo "::error::bcmhnd 工具链缺失"; exit 1; }
+
+      - name: Fetch bcm toolchains
+        run: |
+          set -o pipefail
+          mkdir -p "$HOME/toolchains"
+          for attempt in 1 2 3; do
+            echo "--- 尝试 $attempt ---"
+            rm -rf "$HOME/toolchains/bcm"
+            if git clone --depth 1 --no-checkout --single-branch \
+                https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm" 2>&1 | tee /tmp/clone-bcm.log | tail -3 \
+               && git -C "$HOME/toolchains/bcm" archive --format=tar HEAD 2>>/tmp/clone-bcm.log | tar x -C "$HOME/toolchains/bcm"; then
+              rm -rf "$HOME/toolchains/bcm/.git"
+              echo "STEP_END bcm OK $(du -sh "$HOME/toolchains/bcm" | awk '{print $1}')"
+              break
+            fi
+            tail -8 /tmp/clone-bcm.log
+            sleep 5
+          done
+          test -d "$HOME/toolchains/bcm/hndtools-arm-linux-2.6.36-uclibc-4.5.3" \
+            || { echo "::error::bcm 工具链缺失"; exit 1; }
+
+      - name: Setup toolchains
+        run: |
+          sudo mkdir -p /opt/toolchains /projects/bca/tools/linux/bin
+          sudo chown -R $USER /opt/toolchains /projects
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.3-linux-4.1-glibc-2.24-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-5.3-linux-4.1-glibc-2.24-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-gcc-5.3-linux-4.1-uclibc-1.0.12-glibc-2.24-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-9.2-linux-4.19-glibc-2.30-binutils-2.32 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-9.2-linux-4.19-glibc-2.30-binutils-2.32 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcm"/hndtools-arm-linux-2.6.36-uclibc-4.5.3 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcm"/hndtools-armeabi-2013.11 /projects/bca/tools/linux/
+          ln -sf "$HOME/toolchains/bcm"/fwtag.ini /projects/bca/tools/linux/bin/
+          ln -sf /projects/bca /projects/hnd
+          echo "TOOLCHAIN_BASE=/opt/toolchains" >> "$GITHUB_ENV"
+          ls /opt/toolchains/ | wc -l | xargs echo "toolchain links:"
+
+      - name: Clone source
+        id: clone_source
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -o pipefail
+          echo "克隆 $REPO_URL 分支 $REPO_BRANCH (浅克隆, 约 1.7GB)..."
+          for attempt in 1 2 3; do
+            echo "--- 尝试 $attempt ---"
+            if git clone --depth 1 --single-branch --branch "$REPO_BRANCH" "$REPO_URL" asuswrt-bcm 2>&1 | tail -3; then
+              break
+            fi
+            rm -rf asuswrt-bcm
+            sleep 5
+          done
+          test -d asuswrt-bcm/.git || { echo "::error::源码克隆失败"; exit 1; }
+          echo "source_rev=$(git -C asuswrt-bcm rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "source_rev_short=$(git -C asuswrt-bcm rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Patch source for XD4
+        working-directory: ${{ github.workspace }}
+        run: |
+          bash "$GITHUB_WORKSPACE/custom_scripts/patch_xd4_source.sh" "$GITHUB_WORKSPACE/asuswrt-bcm"
+
+      - name: Verify softcenter in source
+        working-directory: ${{ github.workspace }}/asuswrt-bcm
+        run: |
+          if [ -f "release/src/router/softcenter/Softcenter.asp" ] && [ -d "release/src/router/softcenter/softcenter" ]; then
+            echo "✅ 软件中心已确认在源码中"
+          else
+            echo "::error::软件中心源码缺失！"
+            exit 1
+          fi
+
+      - name: Package prepared environment
+        run: |
+          # 打包工具链 + 补丁后源码（不含 .git，rev 记录在版本文件）
+          echo "${{ steps.clone_source.outputs.source_rev }}" > prep-source-rev.txt
+          tar czf prep-env.tgz \
+            -C "$HOME" toolchains \
+            -C "$GITHUB_WORKSPACE" asuswrt-bcm prep-source-rev.txt
+          ls -lh prep-env.tgz | awk '{print "prep-env.tgz: "$5}'
+
+      - name: Upload prepared environment
+        uses: actions/upload-artifact@main
+        with:
+          name: prep-env
+          path: prep-env.tgz
+          retention-days: 3

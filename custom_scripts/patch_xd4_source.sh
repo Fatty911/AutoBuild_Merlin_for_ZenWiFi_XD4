@@ -100,6 +100,36 @@ fetch_config_sub() {
 (cd release/src/router/bluez-5.56 && ./autogen.sh --no-configure >/dev/null 2>&1) || true
 fetch_config_sub release/src/router/udev-173 || true
 fetch_config_sub release/src/router/bluez-5.56 || true
+
+# bluez 链接 libshared.so 时的未定义符号修复：
+# hnd_boardid_cmp / check_mssid_prelink_reset 在 386 分支整个源码树中只有声明和调用
+# （上游缺陷：RT-AX55 无 MSSID_PRELINK、无 BT_CONN，这些路径从未被构建暴露；
+#   XD4 是 386 分支首个 BT_CONN=y + MSSID_PRELINK=y 机型）。
+# 在 shared/misc.c 末尾注入最小定义（stub 语义：boardid 比较用 nvram，prelink 重置为空操作）。
+SHARED_MISC="release/src/router/shared/misc.c"
+if ! grep -q "hnd_boardid_cmp(const char \*id)" "$SHARED_MISC"; then
+  cat >> "$SHARED_MISC" <<'STUB_EOF'
+
+/* === AutoBuild_Merlin_for_ZenWiFi_XD4 注入: 386 分支缺失的符号定义 === */
+/* hnd_boardid_cmp: HND 板 ID 比较（HND 驱动板 ID 在用户态不可直接获取，
+ * 用 nvram boardid 近似；XD4 上 model.c 只对 RT-BE96U 等分支调用，影响面小） */
+int hnd_boardid_cmp(const char *id)
+{
+	const char *bid = nvram_safe_get("boardid");
+	if (bid == NULL || *bid == '\0')
+		return -1;
+	return strcmp(bid, id);
+}
+
+/* check_mssid_prelink_reset: MSSID_PRELINK 重置检查（386 分支源码缺失定义，
+ * 上游仅在 master/24353 的预编译产物中存在；空实现 = 不执行 prelink 重置） */
+void check_mssid_prelink_reset(uint32_t sf)
+{
+	(void)sf;
+}
+STUB_EOF
+  echo "✅ 已注入 hnd_boardid_cmp/check_mssid_prelink_reset stub 到 shared/misc.c"
+fi
 find release/src/router -maxdepth 4 -type d -name prebuild -exec test -d '{}/RT-AX56_XD4' \; -print 2>/dev/null | head -5 | xargs -I{} echo "  prebuild 存在: {}" || true
 
 echo "=== 验证 ==="
