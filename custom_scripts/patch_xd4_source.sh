@@ -75,6 +75,22 @@ if [ -e "release/src/router/shared/prebuild/RT-AX55/amas_wgn_shared.o" ] && [ ! 
   cp -ar "release/src/router/shared/prebuild/RT-AX55/amas_wgn_shared.o" "release/src/router/shared/prebuild/RT-AX56_XD4/amas_wgn_shared.o"
   echo "✅ 双保险: RT-AX56_XD4/amas_wgn_shared.o 已补齐"
 fi
+
+# udev-173: 老 config.sub 不认识 autoconf 2.71 的 --force 参数
+# （XD4 是 386 分支首个 BT_CONN=y 机型，官方 CI 从未构建过 bluez 依赖链；
+#   udev configure 失败 → libudev.so 缺失 → bluez conftest 链接失败）
+# 用系统新版 config.sub/config.guess 替换（Ubuntu automake 提供，支持 --force）
+if [ -f /usr/share/misc/config.sub ] && [ -f "release/src/router/udev-173/build-aux/config.sub" ]; then
+  cp -f /usr/share/misc/config.sub "release/src/router/udev-173/build-aux/config.sub"
+  cp -f /usr/share/misc/config.guess "release/src/router/udev-173/build-aux/config.guess"
+  echo "✅ 已替换 udev-173 的 config.sub/config.guess 为系统新版"
+elif [ -f /usr/share/automake-1.16/config.sub ] && [ -f "release/src/router/udev-173/build-aux/config.sub" ]; then
+  cp -f /usr/share/automake-1.16/config.sub "release/src/router/udev-173/build-aux/config.sub"
+  cp -f /usr/share/automake-1.16/config.guess "release/src/router/udev-173/build-aux/config.guess"
+  echo "✅ 已替换 udev-173 的 config.sub/config.guess (automake-1.16)"
+else
+  echo "::warning::未找到系统 config.sub 或 udev-173/build-aux 目录，跳过 udev 修复"
+fi
 find release/src/router -maxdepth 4 -type d -name prebuild -exec test -d '{}/RT-AX56_XD4' \; -print 2>/dev/null | head -5 | xargs -I{} echo "  prebuild 存在: {}" || true
 
 echo "=== 验证 ==="
