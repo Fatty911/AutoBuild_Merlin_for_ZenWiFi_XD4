@@ -31,7 +31,7 @@ jobs:
     name: "AI Fix → ${{ github.event.workflow_run.name || inputs.failed_workflow_name }}"
     if: ${{ (github.event_name == 'workflow_dispatch') || (github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.conclusion == 'failure') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 210
     env:
       WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id || inputs.failed_run_id }}
       WORKFLOW_NAME: ${{ github.event.workflow_run.name || inputs.failed_workflow_name }}
@@ -152,6 +152,8 @@ jobs:
           GLM_PROXY_URL: ${{ secrets.GLM_PROXY_URL }}
           ACTIONS_TRIGGER_PAT: ${{ secrets.ACTIONS_TRIGGER_PAT || github.token }}
           GH_TOKEN: ${{ secrets.ACTIONS_TRIGGER_PAT || github.token }}
+          CLASSIFICATION: ${{ steps.classify.outputs.classification }}
+          REASON: ${{ steps.classify.outputs.reason }}
         run: |
           cd "$GITHUB_WORKSPACE"
           bash custom_scripts/run_track3.sh

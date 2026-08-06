@@ -77,6 +77,55 @@ CUSTOM_PROVIDER_INFO = {
         "base_url_env": "GLM_PROXY_BASE_URL",
         "api_key_env": "GLM_PROXY_URL",
     },
+    # === AutoBuild_Merlin_for_ZenWiFi_XD4 补充的 provider（baseURL 取自本机已验证配置）===
+    "volcengine-coding": {
+        "base_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "api_key_env": "VOLCANO_CODINGPLAN_API_KEY",
+    },
+    "volcengine-agentplan": {
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "api_key_env": "VOLCANO_AGENTPLAN_API_KEY",
+    },
+    "kimi-coding-plan": {
+        "base_url": "https://api.kimi.com/coding/v1",
+        "api_key_env": "KIMI_CODINGPLAN_API_KEY",
+    },
+    "deepseek": {
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key_env": "DEEPSEEK_API_KEY",
+    },
+    "zenmux": {
+        "base_url": "https://zenmux.ai/api/v1",
+        "api_key_env": "ZENMUX_API_KEY",
+    },
+    "opencode-go": {
+        "base_url": "https://opencode.ai/zen/go/v1",
+        "api_key_env": "OPENCODE_GO_API_KEY",
+    },
+    "opencode-zen": {
+        "base_url": "https://opencode.ai/zen/v1",
+        "api_key_env": "OPENCODE_ZEN_API_KEY",
+    },
+    "scnet": {
+        "base_url": "https://api.scnet.cn/api/llm/v1",
+        "api_key_env": "SCNET_API_KEY",
+    },
+    "qianfan-coding-plan": {
+        "base_url": "https://qianfan.baidubce.com/v2/coding",
+        "api_key_env": "QIANFAN_CODING_API_KEY",
+    },
+    "alibaba-tokenplan": {
+        "base_url": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        "api_key_env": "ALIYUN_TOKENPLAN_API_KEY",
+    },
+    "tencent-tokenplan": {
+        "base_url": "https://api.lkeap.cloud.tencent.com/plan/v3",
+        "api_key_env": "TENCENT_TOKENPLAN_API_KEY",
+    },
+    "mimo-tokenplan": {
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "api_key_env": "MIMO_TOKENPLAN_API_KEY",
+    },
 }
 
 
@@ -629,6 +678,18 @@ def pick_ranked_models(limit=10):
         "anthropic": os.getenv("ANTHROPIC_API_KEY", "").strip(),
         "openai": os.getenv("OPENAI_API_KEY", "").strip(),
         "zen": os.getenv("ZEN_API_KEY", "").strip(),
+        # AutoBuild_Merlin 补充
+        "volcengine-coding": os.getenv("VOLCANO_CODINGPLAN_API_KEY", "").strip(),
+        "volcengine-agentplan": os.getenv("VOLCANO_AGENTPLAN_API_KEY", "").strip(),
+        "kimi-coding-plan": os.getenv("KIMI_CODINGPLAN_API_KEY", "").strip(),
+        "zenmux": os.getenv("ZENMUX_API_KEY", "").strip(),
+        "opencode-go": os.getenv("OPENCODE_GO_API_KEY", "").strip(),
+        "opencode-zen": os.getenv("OPENCODE_ZEN_API_KEY", "").strip(),
+        "scnet": os.getenv("SCNET_API_KEY", "").strip(),
+        "qianfan-coding-plan": os.getenv("QIANFAN_CODING_API_KEY", "").strip(),
+        "alibaba-tokenplan": os.getenv("ALIYUN_TOKENPLAN_API_KEY", "").strip(),
+        "tencent-tokenplan": os.getenv("TENCENT_TOKENPLAN_API_KEY", "").strip(),
+        "mimo-tokenplan": os.getenv("MIMO_TOKENPLAN_API_KEY", "").strip(),
     }
 
     model_map = {
@@ -641,12 +702,24 @@ def pick_ranked_models(limit=10):
         "nvidia-nim": ("NVIDIA_NIM_MODEL_LIST", "moonshotai/kimi-k2.5"),
         "qiniu": ("QINIU_MODEL_LIST", "nvidia/nemotron-3-super-120b-a12b-free"),
         "minimax": ("MINIMAX_MODEL_LIST", "MiniMax-M2.7"),
-        "deepseek": ("DEEPSEEK_MODEL_LIST", "deepseek-v3.2-exp-thinking,deepseek-v3.2"),
+        "deepseek": ("DEEPSEEK_MODEL_LIST", "deepseek-v4-flash"),
         "modelscope": ("MODELSCOPE_MODEL_LIST", "ZhipuAI/GLM-4.7"),
         "glm-proxy": ("GLM_MODEL_LIST", "GLM-5,GLM-5.1"),
         "xai": ("XAI_MODEL_LIST", "grok-4.2,grok-4.1"),
         "anthropic": ("CLAUDE_MODEL_LIST", "claude-sonnet-4.6,claude-opus-4.6"),
         "openai": ("OPENAI_MODEL_LIST", "gpt-5.4,gpt-4.1"),
+        # AutoBuild_Merlin 补充（默认模型用当前经本机验证可用的）
+        "volcengine-coding": ("VOLCENGINE_CODING_MODEL_LIST", "glm-5.2,kimi-k2.7-code"),
+        "volcengine-agentplan": ("VOLCENGINE_AGENTPLAN_MODEL_LIST", "kimi-k3,glm-5.2"),
+        "kimi-coding-plan": ("KIMI_CODINGPLAN_MODEL_LIST", "k3,kimi-k2.7-code"),
+        "zenmux": ("ZENMUX_MODEL_LIST", "deepseek-v4-flash-free,deepseek-v4-flash"),
+        "opencode-go": ("OPENCODE_GO_MODEL_LIST", "gpt-5.6-luna,deepseek-v4-flash,minimax-m3"),
+        "opencode-zen": ("OPENCODE_ZEN_MODEL_LIST", "opencodezen-nemotron-3-ultra-free,opencodezen-deepseek-v4-flash-free"),
+        "scnet": ("SCNET_MODEL_LIST", "GLM-5.2,Kimi-K3,MiniMax-M3"),
+        "qianfan-coding-plan": ("QIANFAN_CODING_MODEL_LIST", "glm-5.1,deepseek-v4-flash"),
+        "alibaba-tokenplan": ("ALIYUN_TOKENPLAN_MODEL_LIST", "qwen3.8-max-preview,kimi-k2.7-code"),
+        "tencent-tokenplan": ("TENCENT_TOKENPLAN_MODEL_LIST", "kimi-k2.6,glm-5.1"),
+        "mimo-tokenplan": ("MIMO_TOKENPLAN_MODEL_LIST", "mimo-v2.5-pro"),
     }
 
     result = []

@@ -28,7 +28,20 @@ WORKFLOW_FILENAME=$(basename "$WORKFLOW_YML")
 echo "==== 收集可用模型 ===="
 python custom_scripts/pick_best_model.py --ranked > fallback_models.txt 2>/dev/null || true
 python custom_scripts/dmxapi_meta_router.py --list > dmxapi_models.txt 2>/dev/null || true
-cat fallback_models.txt dmxapi_models.txt | awk '!x[$0]++' > models_to_try.txt
+# 硬编码候选排最前（经本机/runner 验证高概率可用的端点，避免 --ranked 榜单过滤漏掉）
+cat > extra_models.txt <<'EOF'
+zhipu/GLM-5.1
+volcengine-coding/glm-5.2
+kimi-coding-plan/k3
+deepseek/deepseek-v4-flash
+scnet/GLM-5.2
+alibaba-tokenplan/qwen3.8-max-preview
+volcengine-agentplan/kimi-k3
+qianfan-coding-plan/glm-5.1
+opencode-go/gpt-5.6-luna
+zenmux/deepseek-v4-flash-free
+EOF
+cat extra_models.txt fallback_models.txt dmxapi_models.txt | awk '!x[$0]++' > models_to_try.txt
 
 if [ ! -s models_to_try.txt ]; then
   echo "::error::无可用模型，OpenCode 自动修复终止"
@@ -46,6 +59,7 @@ RUNTIME_FILES=(
   "models_to_try.txt"
   "dmxapi_models.txt"
   "fallback_models.txt"
+  "extra_models.txt"
   "opencode.json"
   "opencode_output.log"
   "prompt.txt"
@@ -71,6 +85,7 @@ reset_attempt_changes() {
     -e models_to_try.txt \
     -e fallback_models.txt \
     -e dmxapi_models.txt \
+    -e extra_models.txt \
     -e prompt.txt \
     -e opencode_output.log \
     -e opencode.json \
@@ -90,6 +105,9 @@ done
 
 cat > prompt.txt <<EOF
 分析 last_error.log 和失败工作流 ${WORKFLOW_FILENAME}，找到根因并做最小修复。
+${CLASSIFICATION:+错误分类: ${CLASSIFICATION}
+分类说明: ${REASON}
+请围绕该分类定位根因（transient/upstream 类不会走到这里；dependency=依赖或构建环境问题，build_error=编译错误，gate=质量门/产物校验失败）。}
 要求：
 1. 只修复本次 Merlin (asuswrt-bcm 386 分支) 构建失败直接涉及的文件（.github/workflows/ 与 custom_scripts/），不修改其它无关文件。
 2. 不修改或删除 AGENTS.md、README.md。
@@ -101,9 +119,9 @@ EOF
 
 FIX_SUCCEEDED=false
 FIXER_MODEL=""
-MAX_MODEL_TRIES=5
+MAX_MODEL_TRIES=8
 MODEL_TRIES=0
-MODEL_TIMEOUT=1200
+MODEL_TIMEOUT=600
 DMXAPI_BROKEN=false
 while read -r FULL_MODEL; do
   [ -z "$FULL_MODEL" ] && continue
