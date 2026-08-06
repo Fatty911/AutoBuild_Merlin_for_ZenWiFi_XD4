@@ -48,6 +48,18 @@ if [ ! -e "$RSDIR/hostTools/prebuilt/RT-AX56_XD4/addvtoken" ]; then
   echo "✅ 已复制 prebuilt/RT-AX56_XD4/addvtoken (来自 RT-AX56U)"
 fi
 
+# shared/prebuild/ 根下的散文件：Makefile 直接引用 prebuild/amas_wgn_shared.o
+# （wildcard amas_wgn_shared.c 失败时）；386 分支只有 RT-AX55 的 prebuild 含该文件
+if [ ! -e "release/src/router/shared/prebuild/amas_wgn_shared.o" ]; then
+  SRC_O=$(find release/src/router/shared/prebuild -maxdepth 2 -name amas_wgn_shared.o 2>/dev/null | head -1)
+  if [ -n "$SRC_O" ]; then
+    cp -ar "$SRC_O" release/src/router/shared/prebuild/amas_wgn_shared.o
+    echo "✅ 已复制 shared/prebuild/amas_wgn_shared.o (来自 $SRC_O)"
+  else
+    echo "::warning::未找到 amas_wgn_shared.o 来源（RT-AX55 prebuild 缺失？）"
+  fi
+fi
+
 # 通用: 为 RT-AX56_XD4 补齐所有按机型的 prebuild 目录（如 protect_srv/lib/prebuild、
 # bwdpi_source/prebuild 等私有预编译库；XD4 与 RT-AX56U 同平台 BCM6755，产物兼容）
 while IFS= read -r d; do
