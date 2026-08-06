@@ -149,44 +149,51 @@ jobs:
           echo "依赖安装完成。不可用包: $MISSING"
           sudo timedatectl set-timezone "$TZ" || true
 
-      - name: Clone toolchains
+      - name: Fetch bcmhnd toolchains
         run: |
           set -o pipefail
-          df -h / | tail -1
-          # GitHub Actions runner 上 git clone 该仓库 checkout 阶段偶发失败，
-          # 改用 codeload tarball 下载 + 解压（无 checkout 阶段，curl 可重试）
-          fetch_toolchain() {
-            local url="$1" out="$2" dir="$3"
-            mkdir -p "$(dirname "$out")"
-            for attempt in 1 2 3; do
-              echo "--- $dir (尝试 $attempt) ---"
-              rm -rf "$out" "$(dirname "$out")/$dir"
-              if curl -fsSL --retry 3 --connect-timeout 30 -o "$out.tgz" "$url" && tar xzf "$out.tgz" -C "$(dirname "$out")"; then
-                mv "$(dirname "$out")/$dir" "$out"
-                rm -f "$out.tgz"
-                return 0
-              fi
-              rm -f "$out.tgz"
-              sleep 5
-            done
-            return 1
-          }
-          fetch_toolchain \
-            "https://codeload.github.com/SWRT-dev/bcmhnd-toolchains/tar.gz/refs/heads/master" \
-            "$HOME/toolchains/bcmhnd" \
-            "bcmhnd-toolchains-master" \
-            || { echo "::error::bcmhnd-toolchains 下载失败"; exit 1; }
-          fetch_toolchain \
-            "https://codeload.github.com/SWRT-dev/bcm-toolchains/tar.gz/refs/heads/master" \
-            "$HOME/toolchains/bcm" \
-            "bcm-toolchains-master" \
-            || { echo "::error::bcm-toolchains 下载失败"; exit 1; }
-          # 验证关键工具链目录存在
+          echo "STEP_START $(date -u +%H:%M:%S) | $(df -h / | tail -1)"
+          # git clone --no-checkout + git archive 绕开 checkout 阶段（runner 上该仓库 checkout 失败），
+          # 传输仍走 github.com（已验证可用）。分步骤执行缩小故障面。
+          mkdir -p "$HOME/toolchains"
+          for attempt in 1 2 3; do
+            echo "--- 尝试 $attempt ---"
+            rm -rf "$HOME/toolchains/bcmhnd"
+            if git clone --depth 1 --no-checkout --single-branch \
+                https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd" 2>&1 | tee /tmp/clone-bcmhnd.log | tail -3 \
+               && git -C "$HOME/toolchains/bcmhnd" archive --format=tar HEAD 2>>/tmp/clone-bcmhnd.log | tar x -C "$HOME/toolchains/bcmhnd"; then
+              rm -rf "$HOME/toolchains/bcmhnd/.git"
+              echo "STEP_END bcmhnd OK $(du -sh "$HOME/toolchains/bcmhnd" | awk '{print $1}')"
+              break
+            fi
+            echo "--- 失败，日志尾部: ---"
+            tail -8 /tmp/clone-bcmhnd.log
+            sleep 5
+          done
           test -d "$HOME/toolchains/bcmhnd/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1" \
             || { echo "::error::bcmhnd 工具链缺失"; exit 1; }
+
+      - name: Fetch bcm toolchains
+        run: |
+          set -o pipefail
+          echo "STEP_START $(date -u +%H:%M:%S) | $(df -h / | tail -1)"
+          mkdir -p "$HOME/toolchains"
+          for attempt in 1 2 3; do
+            echo "--- 尝试 $attempt ---"
+            rm -rf "$HOME/toolchains/bcm"
+            if git clone --depth 1 --no-checkout --single-branch \
+                https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm" 2>&1 | tee /tmp/clone-bcm.log | tail -3 \
+               && git -C "$HOME/toolchains/bcm" archive --format=tar HEAD 2>>/tmp/clone-bcm.log | tar x -C "$HOME/toolchains/bcm"; then
+              rm -rf "$HOME/toolchains/bcm/.git"
+              echo "STEP_END bcm OK $(du -sh "$HOME/toolchains/bcm" | awk '{print $1}')"
+              break
+            fi
+            echo "--- 失败，日志尾部: ---"
+            tail -8 /tmp/clone-bcm.log
+            sleep 5
+          done
           test -d "$HOME/toolchains/bcm/hndtools-arm-linux-2.6.36-uclibc-4.5.3" \
             || { echo "::error::bcm 工具链缺失"; exit 1; }
-          du -sh "$HOME/toolchains/bcmhnd" "$HOME/toolchains/bcm"
 
       - name: Setup toolchains
         run: |
