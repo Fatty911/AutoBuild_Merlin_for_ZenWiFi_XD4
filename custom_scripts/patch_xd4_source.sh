@@ -106,6 +106,34 @@ else
   echo "::warning::prebuild/RT-AX56_XD4 不存在, 无法补齐根 prebuild 散文件"
 fi
 
+# rc/prebuild SOFTWIRE46 对象补齐: XD4 启用 IPV6S46=y (-> RTCONFIG_SOFTWIRE46)，
+# rc/Makefile 在该条件下把 s46comm.o (OBJS line 323) 与 v6plusd.o/ocnvcd.o/dslited.o
+# (OBJS line 712) 加入 rc 链接，并通过 ./prebuild/<name>.o (根目录) 的 wildcard 规则
+# 从 prebuild 拷贝。但 RT-AX56U 的 rc/prebuild 缺这 4 个文件 (只有 Makefile 未引用的
+# s46map_rptd.o)；RT-AX55 (同平台 947622GW/675x，$(HND-947622_BASE_NOUSB)) 的
+# rc/prebuild 含全部 4 个 -> 从 RT-AX55 补齐。
+# 修复: "No rule to make target 's46comm.o', needed by 'rc'" 及后续 v6plusd/ocnvc/dslite。
+# 双保险: 同时放入 RT-AX56_XD4 机型目录 (构建系统按 BUILD_NAME staging) 与根 prebuild
+# (Makefile wildcard ./prebuild/<name>.o 直接命中)，与 amas_wgn_shared.o 处理方式一致。
+RC_PREBUILD="release/src/router/rc/prebuild"
+for s46obj in s46comm.o v6plusd.o ocnvcd.o dslited.o; do
+  SRC_O=$(find "$RC_PREBUILD" -name "$s46obj" 2>/dev/null | head -1)
+  if [ -n "$SRC_O" ]; then
+    # 机型目录 (构建系统按 BUILD_NAME 拷贝 prebuild 子目录到根)
+    if [ ! -e "$RC_PREBUILD/RT-AX56_XD4/$s46obj" ]; then
+      cp -ar "$SRC_O" "$RC_PREBUILD/RT-AX56_XD4/$s46obj"
+      echo "✅ 已复制 rc/prebuild/RT-AX56_XD4/$s46obj (来自 $(basename "$(dirname "$SRC_O")"))"
+    fi
+    # 根 prebuild (Makefile wildcard ./prebuild/<name>.o 直接命中)
+    if [ ! -e "$RC_PREBUILD/$s46obj" ]; then
+      cp -ar "$SRC_O" "$RC_PREBUILD/$s46obj"
+      echo "✅ 已复制 rc/prebuild/$s46obj (双保险, 来自 $(basename "$(dirname "$SRC_O")"))"
+    fi
+  else
+    echo "::warning::未找到 rc/prebuild/$s46obj (RT-AX55 prebuild 缺失？)"
+  fi
+done
+
 # udev-173/bluez-5.56: 老 config.sub 不认识 autoconf 2.71 的 --force 参数
 # （XD4 是 386 分支首个启用 bluez 依赖链的机型，官方 CI 从未构建过；
 #   注：BT_CONN 已从 XD4 定义移除——386 分支没有 bleencrypt/gatt-amap.h，
