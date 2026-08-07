@@ -7,9 +7,15 @@ on:
     branches:
       - main
     paths:
-      - '.github/workflows/Build_Merlin_Firmware.yml'
+      # 只有影响 prep-env 打包内容的文件才需要重新 Prepare：
+      # - Prepare 自身改动（打包逻辑变化）
+      # - patch_xd4_source.sh（patch 在 Prepare 阶段应用并打包进 prep-env）
+      # 其它 custom_scripts/**（run_track3/classify/extract/multi_agent_review 等
+      # 自修复链脚本）和 Build workflow 改动不影响 prep-env——若也触发 Prepare，
+      # 会与 AI Fix 直接 dispatch 的 Build 并发互杀（build-merlin-firmware
+      # cancel-in-progress），浪费 20-30 分钟打包 + 一次 2-4h 构建。
       - '.github/workflows/Prepare_Build_Environment.yml'
-      - 'custom_scripts/**'
+      - 'custom_scripts/patch_xd4_source.sh'
 
 concurrency:
   group: prepare-merlin-env

@@ -365,8 +365,30 @@ fi
 
 echo "OpenCode 修复成功并已推送"
 
-# ── 验证闭环：修复推送会触发 Prepare（push paths 含 custom_scripts/** 与
-#    Build_Merlin_Firmware.yml）→ Prepare 成功后再 workflow_run 触发 Build 自动验证。
-#    不再手动 dispatch Build：否则与 Prepare 链触发的 Build 并发互杀（concurrency
-#    cancel-in-progress），浪费一次 2-4h 构建。若确实需要立即验证，请手动 dispatch。
+# ── 验证闭环优化（按改动文件判断触发链）──
+# 影响 prep-env 打包内容的只有 patch_xd4_source.sh（patch 在 Prepare 阶段应用并打包）。
+# - 改了 patch_xd4_source.sh → 依赖 push 触发 Prepare→Build（当前行为，必须重新打包）
+# - 只改自修复链脚本/workflow（run_track3/classify/extract/multi_agent_review/
+#   AI_Auto_Fix_Monitor.yml/Build workflow 等）→ prep-env 内容不变，
+#   直接 workflow_dispatch Build 复用最新 prep-env artifact，省掉 Prepare 20-30 分钟。
+CHANGED_FILES=$(git show --name-only --format="" HEAD | sed '/^$/d' | sort -u)
+echo "=== 本次修复改动文件 ==="
+echo "$CHANGED_FILES"
+
+NEEDS_PREPARE=false
+if echo "$CHANGED_FILES" | grep -q "custom_scripts/patch_xd4_source.sh"; then
+  NEEDS_PREPARE=true
+fi
+
+if [ "$NEEDS_PREPARE" = "true" ]; then
+  echo "✅ 改动含 patch_xd4_source.sh，push 将自动触发 Prepare→Build 链（需重新打包 prep-env）"
+else
+  echo "🔁 改动不影响 prep-env 内容，直接 dispatch Build 复用最新 prep-env artifact"
+  if ! gh workflow run "Build Merlin Firmware for ZenWiFi XD4" \
+      -f model=rt-ax56_xd4 -f branch=386 -f use_prepared_env=true 2>&1; then
+    echo "::warning::手动 dispatch Build 失败，依赖 push 触发 Prepare 兜底（若 paths 匹配）"
+  else
+    echo "✅ 已 dispatch Build（复用最新 prep-env，跳过 Prepare）"
+  fi
+fi
 rm -f last_error.log
