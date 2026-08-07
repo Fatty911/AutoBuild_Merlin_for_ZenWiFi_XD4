@@ -247,6 +247,10 @@ jobs:
       - name: Setup toolchains
         if: env.SKIP_BUILD != 'true'
         run: |
+          # prebuild_checks 要求 /bin/sh 指向 bash（Ubuntu 默认 dash 会导致
+          # "ERROR: /bin/sh does not invoke bash shell"；fallback 路径有但
+          # prep-env 恢复路径没有执行过）
+          sudo ln -sf /bin/bash /bin/sh
           sudo mkdir -p /opt/toolchains /projects/bca/tools/linux/bin
           sudo chown -R $USER /opt/toolchains /projects
           ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
