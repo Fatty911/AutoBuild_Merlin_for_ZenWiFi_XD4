@@ -189,8 +189,13 @@ while read -r FULL_MODEL <&3; do
     continue
   fi
 
-  if grep -qiE "ProviderModelNotFoundError|Error: Model not found|\[session\.error\]|UnknownError|Bad Request|certificate has expired|ETIMEDOUT|Failed to create session|Unauthorized|401|429|余额不足|insufficient|quota|balance" opencode_output.log; then
+  # 只匹配 opencode/API 的"唯一错误签名"（模型正文里自然出现的 401/429/
+  # balance/quota/Bad Request/Unauthorized 等词不算失败信号——实测 #45 中
+  # 模型正常分析文本含这些词导致误回滚，正确的修复被丢弃；只有 opencode
+  # 会话级错误才有这些独特签名）
+  if grep -qiE "ProviderModelNotFoundError|Error: Model not found|\[session\.error\]|UnknownError|certificate has expired|ETIMEDOUT|Failed to create session|余额不足" opencode_output.log; then
     echo "::warning::模型输出包含明确失败信号，回滚本次尝试"
+    grep -iE "ProviderModelNotFoundError|Error: Model not found|\[session\.error\]|UnknownError|certificate has expired|ETIMEDOUT|Failed to create session|余额不足" opencode_output.log | head -3 || true
     reset_attempt_changes
     continue
   fi

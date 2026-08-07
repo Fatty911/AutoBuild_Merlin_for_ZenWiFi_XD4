@@ -26,10 +26,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      - name: Free disk space (cleanup caches)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 4096
+          # root-reserve 24G：runner 日志/_diag、/tmp、$HOME/.cache 都在根分区，
+          # 实测 4G 保留会被打包/编译撑爆（No space left on device 崩溃）
+          root-reserve-mb: 24576
           temp-reserve-mb: 2048
           swap-size-mb: 2048
           remove-dotnet: 'true'
