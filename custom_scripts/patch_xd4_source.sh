@@ -79,6 +79,28 @@ if [ -e "release/src/router/shared/prebuild/RT-AX55/amas_wgn_shared.o" ] && [ ! 
   echo "✅ 双保险: RT-AX56_XD4/amas_wgn_shared.o 已补齐"
 fi
 
+# shared/prebuild/ 根下散文件补齐: Makefile 的 private.o/nvpriv.o 规则直接检查
+# ./prebuild/XXX.o (根 prebuild, 非机型子目录)。386 分支 prebuild 根目录只有机型
+# 子目录无散文件, 导致 private.o: 规则的 ifneq($(wildcard ./prebuild/private.o))
+# 为假 -> recipe 为空 -> make 回退到 %.o: %.c -> private.c 不存在 ->
+# "No rule to make target 'private.c', needed by 'private.o'"
+# 同理 nvpriv.o (JFFS_NVRAM=y)、bcmutils.o/bcmwifi_channels.o/bcmxtlv.o 等。
+# 修复: 将 RT-AX56_XD4 机型 prebuild 下的所有 .o 复制到根 prebuild (同平台 BCM6755,
+# 产物兼容; 仅在根不存在时复制, 不覆盖已有文件如 amas_wgn_shared.o)
+PREBUILD_ROOT="release/src/router/shared/prebuild"
+if [ -d "$PREBUILD_ROOT/RT-AX56_XD4" ]; then
+  for o in "$PREBUILD_ROOT/RT-AX56_XD4"/*.o; do
+    [ -f "$o" ] || continue
+    base=$(basename "$o")
+    if [ ! -e "$PREBUILD_ROOT/$base" ]; then
+      cp -ar "$o" "$PREBUILD_ROOT/$base"
+      echo "✅ 已复制 shared/prebuild/$base (来自 RT-AX56_XD4)"
+    fi
+  done
+else
+  echo "::warning::prebuild/RT-AX56_XD4 不存在, 无法补齐根 prebuild 散文件"
+fi
+
 # udev-173/bluez-5.56: 老 config.sub 不认识 autoconf 2.71 的 --force 参数
 # （XD4 是 386 分支首个启用 bluez 依赖链的机型，官方 CI 从未构建过；
 #   注：BT_CONN 已从 XD4 定义移除——386 分支没有 bleencrypt/gatt-amap.h，
