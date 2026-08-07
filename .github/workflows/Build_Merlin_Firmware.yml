@@ -244,6 +244,26 @@ jobs:
         run: |
           bash "$GITHUB_WORKSPACE/custom_scripts/patch_xd4_source.sh" "$GITHUB_WORKSPACE/asuswrt-bcm"
 
+      # ===== 关键宿主开发库（prep 恢复路径也要装：prebuild_checks 检查
+      #       lzo/uuid/ncurses 等头文件，fallback 路径有安装但恢复路径没有）=====
+      - name: Install host dev libraries
+        if: env.SKIP_BUILD != 'true'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get -qq update || sudo apt-get -qq update
+          for pkg in liblzo2-dev uuid-dev libncurses-dev zlib1g-dev libssl-dev \
+                     libxml2-dev libltdl-dev libexpat1-dev libglib2.0-dev \
+                     libvorbis-dev lib32z1-dev lib32stdc++6 lib32gcc-s1 \
+                     libc6-dev-i386 libelf-dev libslang2 gengetopt; do
+            sudo apt-get install -y "$pkg" >/dev/null 2>&1 || echo "跳过: $pkg"
+          done
+          for must in liblzo2-dev uuid-dev libncurses-dev zlib1g-dev libssl-dev; do
+            dpkg -s "$must" >/dev/null 2>&1 || { echo "::error::关键依赖未安装: $must"; exit 1; }
+          done
+          test -f /usr/include/lzo/lzo1x.h || { echo "::error::lzo1x.h 缺失"; exit 1; }
+          echo "✅ 宿主开发库就绪"
+
       - name: Setup toolchains
         if: env.SKIP_BUILD != 'true'
         run: |
