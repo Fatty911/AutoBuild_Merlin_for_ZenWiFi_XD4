@@ -255,12 +255,14 @@ jobs:
           for pkg in liblzo2-dev uuid-dev libncurses-dev zlib1g-dev libssl-dev \
                      libxml2-dev libltdl-dev libexpat1-dev libglib2.0-dev \
                      libvorbis-dev lib32z1-dev lib32stdc++6 lib32gcc-s1 \
-                     libc6-dev-i386 libelf-dev libslang2 gengetopt; do
+                     libc6-dev-i386 libelf-dev libslang2 gengetopt \
+                     gettext gettext-base autopoint; do
             sudo apt-get install -y "$pkg" >/dev/null 2>&1 || echo "跳过: $pkg"
           done
-          for must in liblzo2-dev uuid-dev libncurses-dev zlib1g-dev libssl-dev; do
+          for must in liblzo2-dev uuid-dev libncurses-dev zlib1g-dev libssl-dev gettext; do
             dpkg -s "$must" >/dev/null 2>&1 || { echo "::error::关键依赖未安装: $must"; exit 1; }
           done
+          command -v msgfmt >/dev/null 2>&1 || { echo "::error::msgfmt 缺失（gettext）"; exit 1; }
           test -f /usr/include/lzo/lzo1x.h || { echo "::error::lzo1x.h 缺失"; exit 1; }
           echo "✅ 宿主开发库就绪"
 
