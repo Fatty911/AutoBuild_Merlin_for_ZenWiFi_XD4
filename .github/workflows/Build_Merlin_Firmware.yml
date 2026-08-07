@@ -137,9 +137,19 @@ jobs:
         run: |
           if [ -f prep/prep-env.tgz ]; then
             echo "✅ 已下载 prep-env.tgz ($(ls -lh prep/prep-env.tgz | awk '{print $5}'))"
+            echo "根分区: $(df -h / | tail -1 | awk '{print "可用 "$4" / 总量 "$2}')"
+            echo "workspace: $(df -h "$GITHUB_WORKSPACE" | tail -1 | awk '{print "可用 "$4" / 总量 "$2}')"
             # 解压必须成功：禁止静默吞错（曾因 || true 掩盖解压失败导致 softcenter 缺失）
-            tar xzf prep/prep-env.tgz -C "$HOME" toolchains
+            # 重要：toolchains 解压到 workspace（101G LVM 卷），不在 $HOME（根分区 maximize 后仅剩 2-4G）
+            tar xzf prep/prep-env.tgz -C "$GITHUB_WORKSPACE" toolchains
+            echo "toolchains 解压完成，根分区: $(df -h / | tail -1 | awk '{print "可用 "$4}')"
+            # $HOME/toolchains 软链到 workspace，Setup toolchains 的 $HOME 引用不变
+            rm -rf "$HOME/toolchains" 2>/dev/null || true
+            ln -sfn "$GITHUB_WORKSPACE/toolchains" "$HOME/toolchains"
             tar xzf prep/prep-env.tgz -C "$GITHUB_WORKSPACE" asuswrt-bcm prep-source-rev.txt
+            echo "asuswrt-bcm 解压完成，根分区: $(df -h / | tail -1 | awk '{print "可用 "$4}')"
+            rm -f prep/prep-env.tgz   # 释放 4.2G，为编译腾空间
+            echo "已删除 prep-env.tgz，根分区: $(df -h / | tail -1 | awk '{print "可用 "$4}')"
             # 完整性校验：目录存在 ≠ 内容完整（曾出现目录在但 softcenter 缺失）
             if [ -d "$HOME/toolchains/bcmhnd" ] && [ -d "$GITHUB_WORKSPACE/asuswrt-bcm" ]; then
               if [ -f "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/softcenter/Softcenter.asp" ]; then

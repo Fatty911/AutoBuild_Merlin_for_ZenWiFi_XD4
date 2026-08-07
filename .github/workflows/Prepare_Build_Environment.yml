@@ -189,6 +189,9 @@ jobs:
           # 打包工具链 + 补丁后源码（不含 .git，rev 记录在版本文件）。
           # 用 pigz 并行压缩（单线程 gzip 压 2.4GB 要 15 分钟+）
           echo "${{ steps.clone_source.outputs.source_rev }}" > prep-source-rev.txt
+          # 删除 .git 减小打包/解压体积（Build 不需要 git 历史，rev 在 prep-source-rev.txt）
+          rm -rf asuswrt-bcm/.git 2>/dev/null || true
+          du -sh asuswrt-bcm | awk '{print "asuswrt-bcm 体积: "$1}'
           if command -v pigz >/dev/null 2>&1; then
             tar cf - -C "$HOME" toolchains -C "$GITHUB_WORKSPACE" asuswrt-bcm prep-source-rev.txt | pigz -p 2 > prep-env.tgz
           else
