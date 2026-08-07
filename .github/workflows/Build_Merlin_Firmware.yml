@@ -98,10 +98,12 @@ jobs:
         if: github.event_name == 'schedule' && steps.upstream_cache.outputs.cache-hit == 'true'
         run: |
           echo "上游 $REPO_BRANCH 无更新，跳过本次构建"
+          echo "SKIP_BUILD=true" >> "$GITHUB_ENV"
           exit 0
 
       # ===== 获取准备产物（工具链 + 补丁后源码）=====
       - name: Locate prepared environment artifact
+        if: env.SKIP_BUILD != 'true'
         id: locate_prep
         env:
           GH_TOKEN: ${{ github.token }}
@@ -122,7 +124,7 @@ jobs:
           echo "prep_run_id=$PREP_RUN_ID" >> "$GITHUB_OUTPUT"
 
       - name: Download prepared environment
-        if: steps.locate_prep.outputs.prep_run_id != ''
+        if: env.SKIP_BUILD != 'true' && steps.locate_prep.outputs.prep_run_id != ''
         uses: actions/download-artifact@main
         with:
           name: prep-env
@@ -131,7 +133,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Restore prepared environment
-        if: steps.locate_prep.outputs.prep_run_id != ''
+        if: env.SKIP_BUILD != 'true' && steps.locate_prep.outputs.prep_run_id != ''
         run: |
           if [ -f prep/prep-env.tgz ]; then
             echo "✅ 已下载 prep-env.tgz ($(ls -lh prep/prep-env.tgz | awk '{print $5}'))"
@@ -150,7 +152,7 @@ jobs:
 
       # ===== 全量准备路径（无 prep artifact 时兜底）=====
       - name: Install dependencies (fallback)
-        if: env.PREP_RESTORED != 'true'
+        if: env.SKIP_BUILD != 'true' && env.PREP_RESTORED != 'true'
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -179,7 +181,7 @@ jobs:
           test -f /usr/include/lzo/lzo1x.h || { echo "::error::lzo1x.h 缺失"; exit 1; }
 
       - name: Fetch toolchains (fallback)
-        if: env.PREP_RESTORED != 'true'
+        if: env.SKIP_BUILD != 'true' && env.PREP_RESTORED != 'true'
         run: |
           set -o pipefail
           mkdir -p "$HOME/toolchains"
@@ -205,7 +207,7 @@ jobs:
             || { echo "::error::bcm 工具链缺失"; exit 1; }
 
       - name: Clone source (fallback)
-        if: env.PREP_RESTORED != 'true'
+        if: env.SKIP_BUILD != 'true' && env.PREP_RESTORED != 'true'
         working-directory: ${{ github.workspace }}
         run: |
           set -o pipefail
@@ -218,12 +220,13 @@ jobs:
           test -d asuswrt-bcm/.git || { echo "::error::源码克隆失败"; exit 1; }
 
       - name: Patch source for XD4 (fallback)
-        if: env.PREP_RESTORED != 'true'
+        if: env.SKIP_BUILD != 'true' && env.PREP_RESTORED != 'true'
         working-directory: ${{ github.workspace }}
         run: |
           bash "$GITHUB_WORKSPACE/custom_scripts/patch_xd4_source.sh" "$GITHUB_WORKSPACE/asuswrt-bcm"
 
       - name: Setup toolchains
+        if: env.SKIP_BUILD != 'true'
         run: |
           sudo mkdir -p /opt/toolchains /projects/bca/tools/linux/bin
           sudo chown -R $USER /opt/toolchains /projects
@@ -244,6 +247,7 @@ jobs:
           ls /opt/toolchains/ | wc -l | xargs echo "toolchain links:"
 
       - name: Verify softcenter in source
+        if: env.SKIP_BUILD != 'true'
         working-directory: ${{ github.workspace }}/asuswrt-bcm
         run: |
           if [ -f "release/src/router/softcenter/Softcenter.asp" ] && [ -d "release/src/router/softcenter/softcenter" ]; then
@@ -255,6 +259,7 @@ jobs:
 
       # ===== 内核构建目录增量缓存（key 含上游 commit，源码变化自动失效）=====
       - name: Compute source revision
+        if: env.SKIP_BUILD != 'true'
         id: source_rev
         run: |
           if [ -f prep-source-rev.txt ]; then
@@ -266,6 +271,7 @@ jobs:
           echo "source_rev_short=${REV:0:7}" >> "$GITHUB_OUTPUT"
 
       - name: Cache kernel build directory
+        if: env.SKIP_BUILD != 'true'
         uses: actions/cache@main
         with:
           path: ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/bcmdrivers/broadcom/net/wl/impl69/main/src/linux/linux-4.1
@@ -275,6 +281,7 @@ jobs:
           save-always: false
 
       - name: Build firmware
+        if: env.SKIP_BUILD != 'true'
         id: build
         working-directory: ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}
         env:
@@ -317,6 +324,7 @@ jobs:
           ls -la image/ 2>/dev/null || ls -la
 
       - name: Compute build info
+        if: env.SKIP_BUILD != 'true'
         id: build_info
         run: |
           cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR"
@@ -334,6 +342,7 @@ jobs:
           fi
 
       - name: Build Quality Gate
+        if: env.SKIP_BUILD != 'true'
         id: quality_gate
         env:
           SOURCE: ${{ env.SOURCE }}
@@ -348,6 +357,7 @@ jobs:
           fi
 
       - name: Generate checksums and info
+        if: env.SKIP_BUILD != 'true'
         run: |
           cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR"
           sha256sum "image/$(basename "$FW_FILE")" > "image/$(basename "$FW_FILE").sha256"
@@ -363,6 +373,7 @@ jobs:
           cat "$GITHUB_WORKSPACE/firmware-info.txt"
 
       - name: Upload firmware artifact
+        if: env.SKIP_BUILD != 'true'
         uses: actions/upload-artifact@main
         with:
           name: Merlin_XD4_${{ env.FW_VERSION }}_${{ github.run_number }}
@@ -374,8 +385,8 @@ jobs:
           retention-days: 14
 
       - name: Publish release
+        if: env.SKIP_BUILD != 'true' && steps.quality_gate.outputs.gate_result == 'pass'
         id: publish_release
-        if: steps.quality_gate.outputs.gate_result == 'pass'
         uses: softprops/action-gh-release@master
         with:
           files: |
@@ -392,7 +403,7 @@ jobs:
             - 刷机: 路由器管理页 → 系统管理 → 固件升级 → 选择 .trx 文件
 
       - name: Cleanup old releases
-        if: steps.publish_release.outcome == 'success'
+        if: env.SKIP_BUILD != 'true' && steps.publish_release.outcome == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

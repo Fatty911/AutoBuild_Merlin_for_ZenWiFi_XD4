@@ -1,5 +1,5 @@
 name: AI Auto Fix Monitor
-run-name: "AI Fix → ${{ github.event.workflow_run.name }} (#${{ github.event.workflow_run.run_number }})"
+run-name: "AI Fix → ${{ github.event.workflow_run.name || inputs.failed_workflow_name }} (#${{ github.event.workflow_run.run_number || inputs.failed_run_id }})"
 
 on:
   workflow_run:

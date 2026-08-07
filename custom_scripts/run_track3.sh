@@ -210,8 +210,8 @@ if [ "$FIX_SUCCEEDED" != "true" ]; then
   exit 1
 fi
 
-git config user.name "github-actions[bot]"
-git config user.email "github-actions[bot]@users.noreply.github.com"
+git config user.name "Fatty911"
+git config user.email "xuerui911@gmail.com"
 
 # ── 恢复被 AI 误删的关键文件 ──
 for f in "${PROTECTED_FILES[@]}"; do
@@ -351,8 +351,8 @@ fi
 
 echo "OpenCode 修复成功并已推送"
 
-# ── 只重触发原失败工作流 ──
-WORKFLOW_FILENAME=$(basename "$WORKFLOW_PATH")
-echo "重触发原失败工作流: $WORKFLOW_NAME (文件: $WORKFLOW_FILENAME)"
-gh workflow run "$WORKFLOW_FILENAME" --ref main
+# ── 验证闭环：修复推送会触发 Prepare（push paths 含 custom_scripts/** 与
+#    Build_Merlin_Firmware.yml）→ Prepare 成功后再 workflow_run 触发 Build 自动验证。
+#    不再手动 dispatch Build：否则与 Prepare 链触发的 Build 并发互杀（concurrency
+#    cancel-in-progress），浪费一次 2-4h 构建。若确实需要立即验证，请手动 dispatch。
 rm -f last_error.log
