@@ -308,14 +308,43 @@ def run_review(diff_content, error_log=""):
 
     print(f"\n📊 评审结果: {passes} 通过 / {fails} 不通过 / {errors} 异常")
 
+    # 失败补位: 端点调用异常（超时/403/网络错误）时用剩余未选端点重试，
+    # 避免单点故障导致正确修复被回滚（实测 QIANFAN 订阅过期 403 +
+    # VOLCANO 超时 → 0/2 异常 → 修复被丢弃）
+    spare_models = [m for m in review_models if m not in selected]
+    while errors > 0 and passes < threshold and spare_models:
+        replacement = spare_models.pop(0)
+        family = model_family(f"{replacement['name']} {replacement['model']}")
+        if family == model_family(os.getenv("FIXER_MODEL", "")):
+            print(f"跳过补位模型（同家族）: {replacement['name']}")
+            continue
+        print(f"🔁 端点异常，补位评审模型: {replacement['name']} ({replacement['model']})")
+        try:
+            result = call_review_model(replacement, prompt)
+        except Exception as e:
+            result = {"model": replacement["name"], "passed": None, "reason": str(e)[:200]}
+        results.append(result)
+        status = "✅ PASS" if result["passed"] is True else ("❌ FAIL" if result["passed"] is False else "⚠️ ERROR")
+        print(f"  [{result['model']}] {status} - {result['reason'][:80]}")
+        if result["passed"] is True:
+            passes += 1
+        elif result["passed"] is False:
+            fails += 1
+        else:
+            errors += 1
+        print(f"📊 补位后: {passes} 通过 / {fails} 不通过 / {errors} 异常")
+
     if passes >= threshold:
-        print(f"✅ 共识达成: {passes}/{len(selected)} ≥ {threshold}，评审通过")
+        print(f"✅ 共识达成: {passes}/{len(results)} ≥ {threshold}，评审通过")
         return True, results
     else:
         fail_reasons = [r["reason"] for r in results if r["passed"] is False]
-        print(f"❌ 未达共识: {passes}/{len(selected)} < {threshold}，评审不通过")
+        err_reasons = [r["reason"] for r in results if r["passed"] is None]
+        print(f"❌ 未达共识: {passes}/{len(results)} < {threshold}，评审不通过")
         if fail_reasons:
             print(f"  不通过原因: {'; '.join(fail_reasons[:3])}")
+        if err_reasons:
+            print(f"  端点异常: {'; '.join(err_reasons[:3])}")
         return False, results
 
 
