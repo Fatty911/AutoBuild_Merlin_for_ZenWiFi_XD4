@@ -63,14 +63,19 @@ if [ ! -e "release/src/router/shared/prebuild/amas_wgn_shared.o" ]; then
   fi
 fi
 
-# 通用: 为 RT-AX56_XD4 补齐所有按机型的 prebuild 目录（如 protect_srv/lib/prebuild、
-# bwdpi_source/prebuild 等私有预编译库；XD4 与 RT-AX56U 同平台 BCM6755，产物兼容）
+# 通用: 为 RT-AX56_XD4 补齐所有按机型的 prebuild/prebuilt 目录（如
+# protect_srv/lib/prebuild、bwdpi_source/prebuild 等私有预编译库；
+# 以及 libbcm/prebuilt、libdisk/prebuilt 等预编译 .so 目录）。
+# 上游源码树存在 prebuild(d) 与 prebuilt(t) 两种命名，必须同时匹配：
+# 仅匹配 prebuild 时 libbcm/prebuilt/RT-AX56_XD4 不会被创建，导致
+# libbcm Makefile 'cp -f ./prebuilt/RT-AX56_XD4/libbcm.so' 失败 (Error 1)。
+# XD4 与 RT-AX56U 同平台 BCM6755，产物兼容。
 while IFS= read -r d; do
   if [ -d "$d/RT-AX56U" ] && [ ! -e "$d/RT-AX56_XD4" ]; then
     cp -ar "$d/RT-AX56U" "$d/RT-AX56_XD4"
     echo "✅ prebuild 补齐: $d/RT-AX56U → RT-AX56_XD4"
   fi
-done < <(find release/src/router -maxdepth 4 -type d -name prebuild 2>/dev/null)
+done < <(find release/src/router -maxdepth 4 -type d \( -name prebuild -o -name prebuilt \) 2>/dev/null)
 
 # 双保险: amas_wgn_shared.o 也放进 RT-AX56_XD4 镜像目录
 # （RT-AX56U 的 shared prebuild 缺该文件，从 RT-AX55 补；防止 make 解析路径差异）
@@ -157,7 +162,7 @@ void check_mssid_prelink_reset(uint32_t sf)
 STUB_EOF
   echo "✅ 已注入 hnd_boardid_cmp/check_mssid_prelink_reset stub 到 shared/misc.c"
 fi
-find release/src/router -maxdepth 4 -type d -name prebuild -exec test -d '{}/RT-AX56_XD4' \; -print 2>/dev/null | head -5 | xargs -I{} echo "  prebuild 存在: {}" || true
+find release/src/router -maxdepth 4 -type d \( -name prebuild -o -name prebuilt \) -exec test -d '{}/RT-AX56_XD4' \; -print 2>/dev/null | head -5 | xargs -I{} echo "  prebuild 存在: {}" || true
 
 echo "=== 验证 ==="
 grep -c "RT-AX56_XD4" "$TARGET_MAK" | xargs echo "RT-AX56_XD4 出现次数:"
