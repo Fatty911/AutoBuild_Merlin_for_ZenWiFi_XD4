@@ -35,10 +35,10 @@ volcengine-coding/glm-5.2
 kimi-coding-plan/k3
 deepseek/deepseek-v4-flash
 scnet/GLM-5.2
-alibaba-tokenplan/qwen3.8-max-preview
+alibaba-tokenplan/qwen3.8-max
 volcengine-agentplan/kimi-k3
-qianfan-coding-plan/glm-5.1
-opencode-go/gpt-5.6-luna
+qianfan-coding-plan/glm-5.2
+opencode-go/deepseek-v4-flash
 zenmux/deepseek-v4-flash-free
 EOF
 cat extra_models.txt fallback_models.txt dmxapi_models.txt | awk '!x[$0]++' > models_to_try.txt

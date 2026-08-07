@@ -716,9 +716,9 @@ def pick_ranked_models(limit=10):
         "opencode-go": ("OPENCODE_GO_MODEL_LIST", "gpt-5.6-luna,deepseek-v4-flash,minimax-m3"),
         "opencode-zen": ("OPENCODE_ZEN_MODEL_LIST", "opencodezen-nemotron-3-ultra-free,opencodezen-deepseek-v4-flash-free"),
         "scnet": ("SCNET_MODEL_LIST", "GLM-5.2,Kimi-K3,MiniMax-M3"),
-        "qianfan-coding-plan": ("QIANFAN_CODING_MODEL_LIST", "glm-5.1,deepseek-v4-flash"),
-        "alibaba-tokenplan": ("ALIYUN_TOKENPLAN_MODEL_LIST", "qwen3.8-max-preview,kimi-k2.7-code"),
-        "tencent-tokenplan": ("TENCENT_TOKENPLAN_MODEL_LIST", "kimi-k2.6,glm-5.1"),
+        "qianfan-coding-plan": ("QIANFAN_CODING_MODEL_LIST", "glm-5.2,deepseek-v4-flash"),
+        "alibaba-tokenplan": ("ALIYUN_TOKENPLAN_MODEL_LIST", "qwen3.8-max,kimi-k2.7-code"),
+        "tencent-tokenplan": ("TENCENT_TOKENPLAN_MODEL_LIST", "kimi-k2.6,glm-5.2"),
         "mimo-tokenplan": ("MIMO_TOKENPLAN_MODEL_LIST", "mimo-v2.5-pro"),
     }
 
