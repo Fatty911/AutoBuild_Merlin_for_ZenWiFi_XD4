@@ -53,22 +53,14 @@ jobs:
       contents: write
       actions: write
     steps:
-      - name: Free disk space (cleanup caches)
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
-
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
           # root-reserve 24G：runner 日志/_diag、/tmp、$HOME/.cache 都在根分区，
-          # 实测 4G 保留会被编译撑爆（No space left on device 崩溃）
+          # 实测 4G 保留会被编译撑爆（No space left on device 崩溃）。
+          # 注意: 不要加 jlumbroso/free-disk-space——其 large-packages 卸载与
+          # Install dependencies 的 purge azure-cli*/docker* 冲突，且清空 apt
+          # 缓存导致 apt-get update 重下索引卡死（实测两次 runner 卡死）
           root-reserve-mb: 24576
           temp-reserve-mb: 2048
           swap-size-mb: 2048
