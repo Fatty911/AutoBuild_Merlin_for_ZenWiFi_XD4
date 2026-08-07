@@ -80,6 +80,15 @@ def get_review_models():
             "api_key": volcano_key,
             "model": os.getenv("VOLCANO_REVIEW_MODEL", "kimi-k2.6"),
         })
+        # 同端点同 key 的 GLM-5.2（不同模型家族）：实测 QIANFAN 403 订阅过期、
+        # ALIYUN/MIMO/ZHIPU 配额耗尽时，仅 VOLCANO 一家可用导致 1/2 < 阈值
+        # 评审失败、正确修复被回滚；GLM-5.2 是长期稳定可用的第二家族票
+        models.append({
+            "name": "VOLCANO-GLM",
+            "proxy_url": "https://ark.cn-beijing.volces.com/api/coding/v3",
+            "api_key": volcano_key,
+            "model": os.getenv("VOLCANO_GLM_REVIEW_MODEL", "glm-5.2"),
+        })
 
     aliyun_key = os.getenv("ALIYUN_TOKENPLAN_API_KEY", "").strip()
     if aliyun_key:
