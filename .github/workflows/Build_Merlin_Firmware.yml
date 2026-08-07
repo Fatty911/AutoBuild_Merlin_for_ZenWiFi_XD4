@@ -53,10 +53,23 @@ jobs:
       contents: write
       actions: write
     steps:
+      - name: Free disk space (cleanup caches)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
-          root-reserve-mb: 4096
+          # root-reserve 24G：runner 日志/_diag、/tmp、$HOME/.cache 都在根分区，
+          # 实测 4G 保留会被编译撑爆（No space left on device 崩溃）
+          root-reserve-mb: 24576
           temp-reserve-mb: 2048
           swap-size-mb: 2048
           remove-dotnet: 'true'
@@ -380,10 +393,13 @@ jobs:
         working-directory: ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}
         env:
           TERM: dumb
-          # 编译临时文件必须放 workspace 卷（根分区 maximize 后仅 2-4G，/tmp 会爆）
+          # 编译临时文件/缓存必须放 workspace 卷（根分区 maximize 后仅 ~24G，
+          # /tmp 与 $HOME/.cache 若写根分区会被编译撑爆）
           TMPDIR: ${{ github.workspace }}/tmp
           TMP: ${{ github.workspace }}/tmp
           TEMP: ${{ github.workspace }}/tmp
+          XDG_CACHE_HOME: ${{ github.workspace }}/.cache
+          CCACHE_DIR: ${{ github.workspace }}/ccache
         run: |
           mkdir -p "$TMPDIR"
           # 构建系统的 get_extendno 等目标内部调用 git log，必须配置身份

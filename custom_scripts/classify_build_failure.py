@@ -22,7 +22,6 @@ TRANSIENT_PATTERNS = [
     r"429|503|502|Too Many Requests|Service Unavailable|rate limit",
     # 注意: 不能匹配裸 "runner"（错误日志路径里全是 /home/runner/...）
     r"The runner has exited|runner lost|self-hosted runner|Runner was (reaped|terminated)|infrastructure error",
-    r"no space left on device",
     r"Could not resolve host|Temporary failure in name resolution",
 ]
 
@@ -37,6 +36,9 @@ DEPENDENCY_PATTERNS = [
     r"lzo1x\.h: No such file|required host tools|development library is required",
     r"command not found|No such file or directory.*(gcc|make|flex|bison)",
     r"empty ident name",
+    # 磁盘满：确定性环境故障（maximize 后根分区保留不足），retry 不会自愈，
+    # 允许 AI 修复 workflow 环境（调 root-reserve/加 free-disk-space/设 TMPDIR 等）
+    r"no space left on device|No space left on device|ENOSPC|磁盘空间不足|磁盘剩余",
 ]
 
 BUILD_ERROR_PATTERNS = [
