@@ -22,6 +22,37 @@ ERROR_PATTERNS = [
 ]
 
 
+def find_failed_component(lines):
+    """从 build.log 中定位失败组件：最后一个进入的 release/src/router/<组件> 目录。
+
+    梅林 make 输出 'make[N]: Entering directory '.../release/src/router/<comp>''，
+    失败组件的标志是：进入后出现了 error/failed 行。若无法定位返回 None。
+    同时返回该组件之前的所有成功组件（phase1 列表）。
+    """
+    comp_re = re.compile(r"Entering directory.*?/release/src/router/([^/'\"']+)")
+    visited = []          # 进入顺序
+    last_dir = None
+    last_dir_idx = -1
+    failed = None
+    for i, line in enumerate(lines):
+        m = comp_re.search(line)
+        if m:
+            comp = m.group(1)
+            if comp not in visited:
+                visited.append(comp)
+            last_dir = comp
+            last_dir_idx = i
+        elif last_dir and (last_dir_idx >= 0) and (i - last_dir_idx <= 200):
+            if any(p.search(line) for p in ERROR_PATTERNS):
+                failed = last_dir
+                break
+    if failed and failed in visited:
+        phase1 = visited[: visited.index(failed)]
+    else:
+        phase1 = visited[:-1] if visited else []
+    return failed, phase1, last_dir
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--log", required=True)
@@ -57,6 +88,16 @@ def main() -> int:
     text = "\n".join(context)
     if len(text) > args.max_chars:
         text = text[-args.max_chars:]
+
+    # 失败组件定位（phase1/phase2 增量修复用）
+    failed_comp, phase1_list, last_dir = find_failed_component(lines)
+    if failed_comp:
+        header = f"### 失败组件: {failed_comp} ###\n"
+        header += f"### PHASE1: {','.join(phase1_list) if phase1_list else '(无)'} ###\n"
+        text = header + text
+        print(f"🔧 失败组件: {failed_comp} (phase1={len(phase1_list)} 个组件已成功)")
+    elif last_dir:
+        print(f"ℹ️ 最后进入组件目录: {last_dir}（未捕获错误行，按保守处理）")
 
     Path(args.output).write_text(text, encoding="utf-8")
     print(f"✅ 已提取错误日志: {args.output} ({len(text)} chars, 行 {start}-{start + len(context)})")

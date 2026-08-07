@@ -123,7 +123,9 @@ MAX_MODEL_TRIES=8
 MODEL_TRIES=0
 MODEL_TIMEOUT=600
 DMXAPI_BROKEN=false
-while read -r FULL_MODEL; do
+# 用 fd 3 读取模型列表，避免循环内 opencode 等子进程消费 stdin 导致循环提前 EOF
+exec 3< models_to_try.txt
+while read -r FULL_MODEL <&3; do
   [ -z "$FULL_MODEL" ] && continue
 
   PROVIDER=$(echo "$FULL_MODEL" | cut -d '/' -f 1)
@@ -175,7 +177,7 @@ while read -r FULL_MODEL; do
     --format default \
     --dir "$GITHUB_WORKSPACE" \
     --title "$RUN_TITLE" \
-    "$(cat prompt.txt)" 2>&1 | tee opencode_output.log || OPENCODE_EXIT=$?
+    "$(cat prompt.txt)" < /dev/null 2>&1 | tee opencode_output.log || OPENCODE_EXIT=$?
   echo "opencode 退出码: $OPENCODE_EXIT"
 
   if [ "$OPENCODE_EXIT" -ne 0 ]; then
@@ -202,7 +204,8 @@ while read -r FULL_MODEL; do
 
   echo "⚠️ $FULL_MODEL 未产生非缓存源码修改，继续尝试"
   reset_attempt_changes
-done < models_to_try.txt
+done
+exec 3<&-  # 关闭模型列表 fd
 
 # ── 检查是否最终修复成功 ──
 if [ "$FIX_SUCCEEDED" != "true" ]; then

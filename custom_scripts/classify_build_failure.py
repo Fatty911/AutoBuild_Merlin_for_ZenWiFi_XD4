@@ -51,6 +51,12 @@ GATE_PATTERNS = [
     r"Build Quality Gate.*failed|validate_build_output.*exit",
 ]
 
+PREP_ENV_PATTERNS = [
+    r"软件中心源码缺失|softcenter.*缺失|softcenter.*missing",
+    r"prep-env\.tgz 不存在|环境恢复不完整|恢复的源码缺少",
+    r"Artifact not found for name: prep-env|Unable to download artifact",
+]
+
 
 def classify(log_text: str) -> tuple[str, bool, str]:
     if not log_text.strip():
@@ -67,6 +73,10 @@ def classify(log_text: str) -> tuple[str, bool, str]:
     for pat in DEPENDENCY_PATTERNS:
         if re.search(pat, log_text, re.IGNORECASE):
             return "dependency", True, f"依赖/环境配置问题 ({pat})，可修复构建工作流"
+
+    for pat in PREP_ENV_PATTERNS:
+        if re.search(pat, log_text, re.IGNORECASE):
+            return "prep_env", False, f"准备环境/产物问题 ({pat})，重新 Prepare 或检查打包，不修改代码"
 
     for pat in GATE_PATTERNS:
         if re.search(pat, log_text, re.IGNORECASE):

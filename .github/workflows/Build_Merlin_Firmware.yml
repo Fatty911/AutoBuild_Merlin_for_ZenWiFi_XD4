@@ -51,7 +51,7 @@ jobs:
     timeout-minutes: 420
     permissions:
       contents: write
-      actions: read
+      actions: write
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
@@ -137,14 +137,23 @@ jobs:
         run: |
           if [ -f prep/prep-env.tgz ]; then
             echo "✅ 已下载 prep-env.tgz ($(ls -lh prep/prep-env.tgz | awk '{print $5}'))"
-            tar xzf prep/prep-env.tgz -C "$HOME" toolchains 2>/dev/null || true
-            tar xzf prep/prep-env.tgz -C "$GITHUB_WORKSPACE" asuswrt-bcm prep-source-rev.txt 2>/dev/null || true
+            # 解压必须成功：禁止静默吞错（曾因 || true 掩盖解压失败导致 softcenter 缺失）
+            tar xzf prep/prep-env.tgz -C "$HOME" toolchains
+            tar xzf prep/prep-env.tgz -C "$GITHUB_WORKSPACE" asuswrt-bcm prep-source-rev.txt
+            # 完整性校验：目录存在 ≠ 内容完整（曾出现目录在但 softcenter 缺失）
             if [ -d "$HOME/toolchains/bcmhnd" ] && [ -d "$GITHUB_WORKSPACE/asuswrt-bcm" ]; then
-              echo "PREP_RESTORED=true" >> "$GITHUB_ENV"
-              echo "source_rev=$(cat prep-source-rev.txt 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
-              echo "✅ 环境恢复成功"
+              if [ -f "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/softcenter/Softcenter.asp" ]; then
+                echo "PREP_RESTORED=true" >> "$GITHUB_ENV"
+                echo "source_rev=$(cat prep-source-rev.txt 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
+                echo "✅ 环境恢复成功（含 softcenter）"
+              else
+                echo "::error::恢复的源码缺少 softcenter（prep-env.tgz 打包不完整？），检查 Prepare 打包"
+                ls "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/" | head -5 || true
+                exit 1
+              fi
             else
-              echo "::warning::环境恢复不完整，将走全量准备路径"
+              echo "::error::环境恢复不完整（toolchains 或 asuswrt-bcm 缺失）"
+              exit 1
             fi
           else
             echo "::warning::prep-env.tgz 不存在，将走全量准备路径"
@@ -280,6 +289,52 @@ jobs:
             merlin-kernel-${{ env.REPO_BRANCH }}-
           save-always: false
 
+      # ===== Phase1/Phase2 增量构建：恢复上次构建产物（phase1 已成功组件自动跳过）=====
+      # key 含 source_rev + patch 脚本 hash：上游或补丁变化 → cache miss → 全量重编（正确）
+      - name: Restore phase1 build tree (incremental)
+        if: env.SKIP_BUILD != 'true'
+        uses: actions/cache/restore@main
+        with:
+          path: ${{ github.workspace }}/asuswrt-bcm/release
+          key: merlin-buildtree-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-${{ hashFiles('custom_scripts/patch_xd4_source.sh', 'custom_scripts/*.sh') }}
+
+      - name: Prepare incremental build (phase1 skip + phase2 failed component)
+        if: env.SKIP_BUILD != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE_DIR="$GITHUB_WORKSPACE/asuswrt-bcm/release"
+          # 1) 获取上次失败组件（phase2）：下载最近一次失败 Build run 的 error-log
+          FAILED_COMPONENT=""
+          PREV_FAIL=$(gh run list --workflow=Build_Merlin_Firmware.yml --status failure --limit 1 \
+            --json databaseId --jq '.[0].databaseId' 2>/dev/null || echo "")
+          if [ -n "$PREV_FAIL" ] && [ "$PREV_FAIL" != "${{ github.run_id }}" ]; then
+            mkdir -p /tmp/prev_err
+            gh run download "$PREV_FAIL" -n error-log -D /tmp/prev_err 2>/dev/null || true
+            FAILED_COMPONENT=$(grep -oP '(?<=^### 失败组件: ).*?(?= ###)' \
+              /tmp/prev_err/last_error.log 2>/dev/null | head -1 || true)
+          fi
+          # 2) 删除失败组件产物，强制 phase2 重编（make 增量对缺失产物自动重建）
+          if [ -n "$FAILED_COMPONENT" ] && [ -d "$RELEASE_DIR/src/router/$FAILED_COMPONENT" ]; then
+            echo "🔧 phase2: 强制重编失败组件 $FAILED_COMPONENT"
+            find "$RELEASE_DIR/src/router/$FAILED_COMPONENT" -type f \
+              \( -name '*.o' -o -name '*.a' -o -name '*.so' -o -name '*.lo' \) -delete 2>/dev/null || true
+          fi
+          # 3) 时间戳调整：产物→当前，源码→过去，使 make 判定产物不过期（phase1 跳过）
+          NOW_TS=$(date +%s)
+          PROD_TS=$((NOW_TS + 3600))     # 产物 = 未来 1h，保证新于任何源码
+          SRC_TS=$((NOW_TS - 86400))     # 源码 = 昨天
+          if [ -d "$RELEASE_DIR" ]; then
+            find "$RELEASE_DIR/src-rt-5.02axhnd.675x" "$RELEASE_DIR/src/router" \
+              -type f \( -name '*.o' -o -name '*.a' -o -name '*.so' -o -name '*.ko' -o -name '*.lo' -o -name '*.d' -o -name '*.dep' -o -name '*.cmd' -o -perm -111 \) \
+              -exec touch -d "@$PROD_TS" {} + 2>/dev/null || true
+            find "$RELEASE_DIR/src/router" -type f \( -name '*.c' -o -name '*.h' -o -name 'Makefile' -o -name '*.mk' -o -name '*.sh' \) \
+              -exec touch -d "@$SRC_TS" {} + 2>/dev/null || true
+            echo "✅ 增量构建准备完成（产物→$PROD_TS, 源码→$SRC_TS）"
+          else
+            echo "ℹ️ 无缓存产物，本次为全量构建（phase1 为空）"
+          fi
+
       - name: Build firmware
         if: env.SKIP_BUILD != 'true'
         id: build
@@ -383,6 +438,15 @@ jobs:
             ${{ github.workspace }}/firmware-info.txt
             ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/build.log
           retention-days: 14
+
+      # ===== Phase1 固化：无论成败都保存构建产物（失败时保存已成功组件，供下次增量）=====
+      - name: Save phase1 build tree (incremental cache)
+        if: ${{ always() && !cancelled() && env.SKIP_BUILD != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@main
+        with:
+          path: ${{ github.workspace }}/asuswrt-bcm/release
+          key: merlin-buildtree-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-${{ hashFiles('custom_scripts/patch_xd4_source.sh', 'custom_scripts/*.sh') }}
 
       - name: Publish release
         if: env.SKIP_BUILD != 'true' && steps.quality_gate.outputs.gate_result == 'pass'

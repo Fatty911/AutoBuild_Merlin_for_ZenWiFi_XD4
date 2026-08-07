@@ -194,7 +194,15 @@ jobs:
           else
             tar czf prep-env.tgz -C "$HOME" toolchains -C "$GITHUB_WORKSPACE" asuswrt-bcm prep-source-rev.txt
           fi
-          ls -lh prep-env.tgz | awk '{print "prep-env.tgz: "$5}'
+          ls -lh prep-env.tgz | awk '{print "prep-env.tgz: " $5}'
+          # 打包后验证：确认归档内关键文件齐全（防止打包漏项导致 Build 恢复后缺失）
+          echo "=== 打包内容验证 ==="
+          tar tzf prep-env.tgz 2>/dev/null | grep -c "release/src/router/softcenter/Softcenter.asp" \
+            | xargs -I{} sh -c '[ {} -ge 1 ] && echo "✅ softcenter 已在归档中" || { echo "::error::归档缺少 softcenter！"; exit 1; }'
+          tar tzf prep-env.tgz 2>/dev/null | grep -c "toolchains/bcmhnd" \
+            | xargs -I{} sh -c '[ {} -ge 1 ] && echo "✅ bcmhnd 工具链已在归档中" || { echo "::error::归档缺少 bcmhnd！"; exit 1; }'
+          tar tzf prep-env.tgz 2>/dev/null | grep -c "prep-source-rev.txt" \
+            | xargs -I{} sh -c '[ {} -ge 1 ] && echo "✅ prep-source-rev.txt 已在归档中" || { echo "::error::归档缺少 rev 文件！"; exit 1; }'
 
       - name: Upload prepared environment
         uses: actions/upload-artifact@main
