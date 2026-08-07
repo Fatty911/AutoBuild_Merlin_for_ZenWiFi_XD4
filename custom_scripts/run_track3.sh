@@ -63,6 +63,11 @@ RUNTIME_FILES=(
   "opencode.json"
   "opencode_output.log"
   "prompt.txt"
+  # OMO/opencode 会话与索引目录（仓库内生成，绝不可提交：
+  # 实测 AI Fix #51 修复模型把 .omo/run-continuation/*.json 误暂存，
+  # 被评审模型以"Commit includes ephemeral IDE/session artifact"拒绝）
+  ".omo"
+  ".codegraph"
 )
 
 stage_source_changes() {
@@ -74,7 +79,8 @@ stage_source_changes() {
 discard_runtime_files() {
   git restore --staged -- "${RUNTIME_FILES[@]}" 2>/dev/null || true
   git restore --worktree -- "${RUNTIME_FILES[@]}" 2>/dev/null || true
-  rm -f "${RUNTIME_FILES[@]}"
+  # .omo/.codegraph 是目录，rm -f 会失败（set -e 下中断脚本），用 rm -rf
+  rm -rf "${RUNTIME_FILES[@]}"
 }
 
 reset_attempt_changes() {
