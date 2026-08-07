@@ -114,7 +114,8 @@ jobs:
       - name: Run OpenCode Agent (multi-model repair)
         id: opencode_fix
         if: steps.classify.outputs.should_fix == 'true'
-        timeout-minutes: 120
+        # MODEL_TIMEOUT=1200（20 分钟/模型）× MAX_MODEL_TRIES=8 = 理论上限 160 分钟
+        timeout-minutes: 180
         env:
           WORKFLOW_RUN_ID: ${{ env.WORKFLOW_RUN_ID }}
           WORKFLOW_NAME: ${{ env.WORKFLOW_NAME }}

@@ -127,7 +127,7 @@ FIX_SUCCEEDED=false
 FIXER_MODEL=""
 MAX_MODEL_TRIES=8
 MODEL_TRIES=0
-MODEL_TIMEOUT=600
+MODEL_TIMEOUT=1200
 DMXAPI_BROKEN=false
 # 用 fd 3 读取模型列表，避免循环内 opencode 等子进程消费 stdin 导致循环提前 EOF
 exec 3< models_to_try.txt
