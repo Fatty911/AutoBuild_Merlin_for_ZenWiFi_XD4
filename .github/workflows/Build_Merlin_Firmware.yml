@@ -330,17 +330,16 @@ jobs:
             find "$RELEASE_DIR/src/router/$FAILED_COMPONENT" -type f \
               \( -name '*.o' -o -name '*.a' -o -name '*.so' -o -name '*.lo' \) -delete 2>/dev/null || true
           fi
-          # 3) 时间戳调整：产物→当前，源码→过去，使 make 判定产物不过期（phase1 跳过）
+          # 3) 时间戳调整：只把产物 touch 到当前时间（比源码解压时间新），使 make 跳过 phase1
+          #    注意：绝不能 touch 未来时间戳（会触发 make Clock skew 导致生成步骤失效），
+          #    也绝不 touch 源码/Makefile/configure 脚本（会触发 autoconf/automake 重跑）
           NOW_TS=$(date +%s)
-          PROD_TS=$((NOW_TS + 3600))     # 产物 = 未来 1h，保证新于任何源码
-          SRC_TS=$((NOW_TS - 86400))     # 源码 = 昨天
+          PROD_TS=$((NOW_TS - 60))      # 产物 = 1 分钟前（比任何源码新即可）
           if [ -d "$RELEASE_DIR" ]; then
             find "$RELEASE_DIR/src-rt-5.02axhnd.675x" "$RELEASE_DIR/src/router" \
-              -type f \( -name '*.o' -o -name '*.a' -o -name '*.so' -o -name '*.ko' -o -name '*.lo' -o -name '*.d' -o -name '*.dep' -o -name '*.cmd' -o -perm -111 \) \
+              -type f \( -name '*.o' -o -name '*.a' -o -name '*.so' -o -name '*.ko' -o -name '*.lo' -o -name '*.d' -o -name '*.dep' -o -name '*.cmd' \) \
               -exec touch -d "@$PROD_TS" {} + 2>/dev/null || true
-            find "$RELEASE_DIR/src/router" -type f \( -name '*.c' -o -name '*.h' -o -name 'Makefile' -o -name '*.mk' -o -name '*.sh' \) \
-              -exec touch -d "@$SRC_TS" {} + 2>/dev/null || true
-            echo "✅ 增量构建准备完成（产物→$PROD_TS, 源码→$SRC_TS）"
+            echo "✅ 增量构建准备完成（产物→$PROD_TS，源码保持 prep 解压时间戳）"
           else
             echo "ℹ️ 无缓存产物，本次为全量构建（phase1 为空）"
           fi
