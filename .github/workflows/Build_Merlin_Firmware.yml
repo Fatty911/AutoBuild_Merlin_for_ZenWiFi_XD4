@@ -350,7 +350,12 @@ jobs:
         working-directory: ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}
         env:
           TERM: dumb
+          # 编译临时文件必须放 workspace 卷（根分区 maximize 后仅 2-4G，/tmp 会爆）
+          TMPDIR: ${{ github.workspace }}/tmp
+          TMP: ${{ github.workspace }}/tmp
+          TEMP: ${{ github.workspace }}/tmp
         run: |
+          mkdir -p "$TMPDIR"
           # 构建系统的 get_extendno 等目标内部调用 git log，必须配置身份
           git config --global user.name "Fatty911"
           git config --global user.email "xuerui911@gmail.com"
