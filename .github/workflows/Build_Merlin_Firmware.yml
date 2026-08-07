@@ -341,7 +341,7 @@ jobs:
         uses: actions/cache/restore@main
         with:
           path: ${{ github.workspace }}/asuswrt-bcm/release
-          key: merlin-buildtree-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-${{ hashFiles('custom_scripts/patch_xd4_source.sh', 'custom_scripts/*.sh') }}
+          key: merlin-buildtree-v2-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-${{ hashFiles('custom_scripts/patch_xd4_source.sh', 'custom_scripts/*.sh') }}
 
       - name: Prepare incremental build (phase1 skip + phase2 failed component)
         if: env.SKIP_BUILD != 'true'
@@ -360,10 +360,16 @@ jobs:
               /tmp/prev_err/last_error.log 2>/dev/null | head -1 || true)
           fi
           # 2) 删除失败组件产物，强制 phase2 重编（make 增量对缺失产物自动重建）
+          #    重要: 必须排除 prebuild/ 目录--prebuild 下的 .o 是上游预编译产物
+          #    (private.o/nvpriv.o/bcmutils.o 等，源码树无对应 .c 文件)，不是编译输出。
+          #    误删会导致 "No rule to make target 'private.c', needed by 'private.o'"
+          #    因为 Makefile 的 ifneq($(wildcard ./prebuild/private.o)) 回退到 %.o:%.c。
           if [ -n "$FAILED_COMPONENT" ] && [ -d "$RELEASE_DIR/src/router/$FAILED_COMPONENT" ]; then
             echo "🔧 phase2: 强制重编失败组件 $FAILED_COMPONENT"
             find "$RELEASE_DIR/src/router/$FAILED_COMPONENT" -type f \
-              \( -name '*.o' -o -name '*.a' -o -name '*.so' -o -name '*.lo' \) -delete 2>/dev/null || true
+              \( -name '*.o' -o -name '*.a' -o -name '*.so' -o -name '*.lo' \) \
+              -not -path '*/prebuild/*' \
+              -delete 2>/dev/null || true
           fi
           # 3) 时间戳调整：只把产物 touch 到当前时间（比源码解压时间新），使 make 跳过 phase1
           #    注意：绝不能 touch 未来时间戳（会触发 make Clock skew 导致生成步骤失效），
@@ -498,7 +504,7 @@ jobs:
         uses: actions/cache/save@main
         with:
           path: ${{ github.workspace }}/asuswrt-bcm/release
-          key: merlin-buildtree-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-${{ hashFiles('custom_scripts/patch_xd4_source.sh', 'custom_scripts/*.sh') }}
+          key: merlin-buildtree-v2-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-${{ hashFiles('custom_scripts/patch_xd4_source.sh', 'custom_scripts/*.sh') }}
 
       - name: Publish release
         if: env.SKIP_BUILD != 'true' && steps.quality_gate.outputs.gate_result == 'pass'
