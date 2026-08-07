@@ -13,11 +13,11 @@ from pathlib import Path
 ERROR_PATTERNS = [
     re.compile(r"make.*\*\*\*.*Error", re.IGNORECASE),
     re.compile(r"\*\*\*.*(?:No rule to make target|recipe for target).*failed"),
-    re.compile(r"(?:error|fatal error|undefined reference|No such file|not found|command not found)",
+    re.compile(r"(?:fatal error|undefined reference|No such file|command not found)",
                re.IGNORECASE),
     re.compile(r"make\[\d+\]: \*\*\*"),
     re.compile(r"configure: error"),
-    re.compile(r"cc1?:\s*(?:error|fatal)"),
+    re.compile(r"cc1?:?\s*(?:error|fatal)"),
     re.compile(r"collect2: error"),
 ]
 
@@ -29,7 +29,7 @@ def find_failed_component(lines):
     失败组件的标志是：进入后出现了 error/failed 行。若无法定位返回 None。
     同时返回该组件之前的所有成功组件（phase1 列表）。
     """
-    comp_re = re.compile(r"Entering directory.*?/release/src/router/([^/'\"']+)")
+    comp_re = re.compile(r"Entering directory.*?/release/src/router/([^/'\"]+)")
     visited = []          # 进入顺序
     last_dir = None
     last_dir_idx = -1
@@ -43,6 +43,8 @@ def find_failed_component(lines):
             last_dir = comp
             last_dir_idx = i
         elif last_dir and (last_dir_idx >= 0) and (i - last_dir_idx <= 200):
+            if "warning" in line.lower():
+                continue  # cc1: warning 常含 "No such file"（-I 目录缺失），非错误
             if any(p.search(line) for p in ERROR_PATTERNS):
                 failed = last_dir
                 break
