@@ -420,11 +420,11 @@ jobs:
           # 等待 web session 链接出现（最长 120s）
           WEB=""
           for i in $(seq 1 60); do
-            WEB=$(grep -oE 'https://tmate\.io/t/[A-Za-z0-9]+' /tmp/tmate.log 2>/dev/null | head -1)
+            WEB=$(grep -oE 'https://tmate\.io/t/[A-Za-z0-9-]+' /tmp/tmate.log 2>/dev/null | head -1)
             [ -n "$WEB" ] && break
             sleep 2
           done
-          SSH_LINE=$(grep -oE 'ssh [A-Za-z0-9]+@ssh\.tmate\.io' /tmp/tmate.log 2>/dev/null | head -1 || true)
+          SSH_LINE=$(grep -oE 'ssh [A-Za-z0-9-]+@ssh\.tmate\.io' /tmp/tmate.log 2>/dev/null | head -1 || true)
           if [ -n "$WEB" ]; then
             echo "::notice title=tmate web session::$WEB"
             echo "::notice title=tmate ssh::$SSH_LINE"
