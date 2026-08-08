@@ -386,11 +386,18 @@ jobs:
           set -e
           # 安装 tmate（Ubuntu 24.04 无 apt 包，用官方静态二进制）
           TMATE_VER=2.4.0
-          curl -fsSL -o /tmp/tmate.tar.xz \
-            "https://github.com/tmate-io/tmate/releases/download/${TMATE_VER}/tmate-${TMATE_VER}-static-linux-amd64.tar.xz"
+          curl -fsSL --max-time 60 -o /tmp/tmate.tar.xz \
+            "https://github.com/tmate-io/tmate/releases/download/${TMATE_VER}/tmate-${TMATE_VER}-static-linux-amd64.tar.xz" || {
+            echo "::error::tmate 下载失败（60s 超时）"
+            gh api "repos/${GITHUB_REPOSITORY}/issues/1/comments" \
+              -f body="TMATE FAILED run ${GITHUB_RUN_ID}: tmate 下载超时" \
+              --jq '.id' 2>/dev/null || true
+            exit 1
+          }
           tar -xJf /tmp/tmate.tar.xz -C /tmp
           TMATE_BIN=$(find /tmp -name tmate -type f | head -1)
           echo "tmate bin: $TMATE_BIN"
+          [ -n "$TMATE_BIN" ] || { echo "::error::tmate 二进制未找到"; exit 1; }
 
           # 生成临时 SSH key（tmate 2.4 不支持 ed25519，必须 RSA；
           # web 链接无需 key 即可浏览器访问）
@@ -400,6 +407,12 @@ jobs:
           # 前台启动 tmate，日志 tee 到文件（-F 保持会话直到断开）
           "$TMATE_BIN" -F -n github 2>&1 | tee /tmp/tmate.log &
           TMATE_PID=$!
+          sleep 5
+          # 心跳：tmate 启动 5s 后的日志写 issue（诊断启动是否卡住）
+          gh api "repos/${GITHUB_REPOSITORY}/issues/1/comments" \
+            -f body="TMATE BOOT run ${GITHUB_RUN_ID}
+          $(tail -c 1500 /tmp/tmate.log 2>/dev/null || echo no-log)" \
+            --jq '.id' 2>/dev/null || true
 
           # 等待 web session 链接出现（最长 120s）
           WEB=""
