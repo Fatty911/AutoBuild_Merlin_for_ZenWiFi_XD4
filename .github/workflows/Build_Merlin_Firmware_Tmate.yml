@@ -391,8 +391,9 @@ jobs:
           TMATE_BIN=$(find /tmp -name tmate -type f | head -1)
           echo "tmate bin: $TMATE_BIN"
 
-          # 生成临时 SSH key（tmate 需要私钥；web 链接无需 key 即可浏览器访问）
-          ssh-keygen -t ed25519 -N "" -f /tmp/tmate_key -q
+          # 生成临时 SSH key（tmate 2.4 不支持 ed25519，必须 RSA；
+          # web 链接无需 key 即可浏览器访问）
+          ssh-keygen -t rsa -b 2048 -N "" -f /tmp/tmate_key -q
           export TMATE_SSH_KEY=/tmp/tmate_key
 
           # 前台启动 tmate，日志 tee 到文件（-F 保持会话直到断开）
@@ -413,10 +414,19 @@ jobs:
             echo "✅ tmate 已就绪: $WEB"
             # 双保险：把链接写入 issue #1 评论（GitHub API 实时可读，
             # 运行中日志/annotations 可能不可用）
-            gh api "repos/${GITHUB_REPOSITORY}/issues/1/comments"               -f body="TMATE WEB: $WEB"               --jq '.id' 2>/dev/null && echo "✅ tmate 链接已写入 issue #1" || echo "::warning::写入 issue 失败（gh 权限不足？）"
+            gh api "repos/${GITHUB_REPOSITORY}/issues/1/comments" \
+              -f body="TMATE WEB: $WEB
+          TMATE SSH: $SSH_LINE
+          run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+              --jq '.id' 2>/dev/null && echo "✅ tmate 链接已写入 issue #1" || echo "::warning::写入 issue 失败（gh 权限不足？）"
           else
             echo "::warning::tmate web 链接未在 120s 内出现，日志如下："
             cat /tmp/tmate.log || true
+            # 失败日志也写入 issue 便于外部诊断
+            gh api "repos/${GITHUB_REPOSITORY}/issues/1/comments" \
+              -f body="TMATE FAILED run ${GITHUB_RUN_ID}
+          $(tail -c 3000 /tmp/tmate.log 2>/dev/null || echo no-log)" \
+              --jq '.id' 2>/dev/null || true
           fi
 
           # 保持会话存活直到外部断开/超时（tmate -F 前台运行，wait 等它）
