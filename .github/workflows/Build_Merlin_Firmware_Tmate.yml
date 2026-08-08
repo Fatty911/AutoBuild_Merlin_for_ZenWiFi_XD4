@@ -45,6 +45,7 @@ jobs:
     permissions:
       contents: write
       actions: write
+      issues: write
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
