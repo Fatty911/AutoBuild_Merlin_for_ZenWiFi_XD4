@@ -446,6 +446,16 @@ jobs:
               --jq '.id' 2>/dev/null || true
           fi
 
+          # 自动后台启动编译（runner 硬件资源立即使用，不等待 tmate.io）
+          # tmate.io 平台故障时编译照常推进，tmate 仅作调试通道（恢复后可用）
+          cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR"
+          nohup make rt-ax56_xd4 > /tmp/build-auto.log 2>&1 &
+          BUILD_PID=$!
+          echo "✅ 自动编译已启动 PID=$BUILD_PID（nohup make rt-ax56_xd4）"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/1/comments" \
+            -f body="BUILD AUTO START run ${GITHUB_RUN_ID}: make rt-ax56_xd4 PID=$BUILD_PID" \
+            --jq '.id' 2>/dev/null || true
+
           # 保持会话存活直到外部断开/超时（tmate -F 前台运行，wait 等它）
           # 手动编译命令（在 tmate 会话内执行）：
           #   cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/src-rt-5.02axhnd.675x"
@@ -453,7 +463,14 @@ jobs:
           # 报错后读取 /tmp/build-tail.log 分析解决，成功后固件在
           # release/src-rt-5.02axhnd.675x/images/ 下。
           wait $TMATE_PID || true
-          echo "tmate 会话结束"
+          echo "tmate 会话结束（自动编译 PID=$BUILD_PID 状态：$(kill -0 $BUILD_PID 2>/dev/null && echo 运行中 || echo 已结束)）"
+          # 编译结束/失败后把日志尾部写入 issue（外部可读）
+          if [ -f /tmp/build-auto.log ]; then
+            gh api "repos/${GITHUB_REPOSITORY}/issues/1/comments" \
+              -f body="BUILD AUTO END run ${GITHUB_RUN_ID}
+          $(tail -c 3000 /tmp/build-auto.log 2>/dev/null || echo no-log)" \
+              --jq '.id' 2>/dev/null || true
+          fi
 
       - name: Compute build info
         if: env.SKIP_BUILD != 'true'
