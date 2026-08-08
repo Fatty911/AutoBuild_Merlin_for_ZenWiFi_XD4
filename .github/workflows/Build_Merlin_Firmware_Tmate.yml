@@ -1,0 +1,509 @@
+name: Build Merlin Firmware for ZenWiFi XD4 (Tmate)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: '构建目标 (rt-ax56_xd4 = XD4 专用配置, rt-ax56u = RT-AX56U)'
+        type: choice
+        default: rt-ax56_xd4
+        options:
+          - rt-ax56_xd4
+          - rt-ax56u
+      branch:
+        description: '上游 SWRT-dev/asuswrt-bcm 分支'
+        type: choice
+        default: '386'
+        options:
+          - '386'
+          - '24353'
+          - 'master'
+      use_prepared_env:
+        description: '使用 Prepare 工作流打包的环境（默认 true，false 则全量准备）'
+        type: boolean
+        default: true
+
+concurrency:
+  # 独立组：tmate 交互调试会话可长时间占用 runner，不与正常流水线互斥
+  group: build-merlin-tmate
+  cancel-in-progress: false
+
+env:
+  TZ: Asia/Shanghai
+  SOURCE: SWRT_Merlin_386
+  REPO_URL: https://github.com/SWRT-dev/asuswrt-bcm
+  REPO_BRANCH: ${{ github.event.client_payload.branch || inputs.branch || '386' }}
+  SDK_DIR: src-rt-5.02axhnd.675x
+  MODEL: ${{ inputs.model || 'rt-ax56_xd4' }}
+  TOOLCHAIN_BASE: /opt/toolchains
+
+jobs:
+  build:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          # root-reserve 24G：runner 日志/_diag、/tmp、$HOME/.cache 都在根分区，
+          # 实测 4G 保留会被编译撑爆（No space left on device 崩溃）。
+          # 注意: 不要加 jlumbroso/free-disk-space——其 large-packages 卸载与
+          # Install dependencies 的 purge azure-cli*/docker* 冲突，且清空 apt
+          # 缓存导致 apt-get update 重下索引卡死（实测两次 runner 卡死）
+          root-reserve-mb: 24576
+          temp-reserve-mb: 2048
+          swap-size-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Checkout
+        uses: actions/checkout@main
+        with:
+          fetch-depth: 1
+
+      # 定时触发时先查上游 HEAD，无变化直接跳过（避免空跑 2 小时）
+      - name: Check upstream change (scheduled runs only)
+        id: upstream_check
+        if: github.event_name == 'schedule'
+        run: |
+          echo "检查上游 $REPO_URL 分支 $REPO_BRANCH..."
+          UPSTREAM_HASH=$(git ls-remote "$REPO_URL" "refs/heads/$REPO_BRANCH" | awk '{print $1}')
+          echo "upstream_hash=$UPSTREAM_HASH" >> "$GITHUB_OUTPUT"
+          echo "上游 $REPO_BRANCH HEAD: $UPSTREAM_HASH"
+
+      - name: Cache upstream HEAD marker
+        id: upstream_cache
+        if: github.event_name == 'schedule'
+        uses: actions/cache@main
+        with:
+          path: .upstreamHash
+          key: upstream-${{ env.REPO_BRANCH }}-${{ steps.upstream_check.outputs.upstream_hash }}
+
+      - name: Save upstream marker (new hash)
+        if: github.event_name == 'schedule' && steps.upstream_cache.outputs.cache-hit != 'true'
+        run: |
+          echo "${{ steps.upstream_check.outputs.upstream_hash }}" > .upstreamHash
+          echo "已记录新上游 HEAD"
+
+      - name: Skip if upstream unchanged
+        if: github.event_name == 'schedule' && steps.upstream_cache.outputs.cache-hit == 'true'
+        run: |
+          echo "上游 $REPO_BRANCH 无更新，跳过本次构建"
+          echo "SKIP_BUILD=true" >> "$GITHUB_ENV"
+          exit 0
+
+      # ===== 获取准备产物（工具链 + 补丁后源码）=====
+      - name: Locate prepared environment artifact
+        if: env.SKIP_BUILD != 'true'
+        id: locate_prep
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            PREP_RUN_ID="${{ github.event.workflow_run.id }}"
+            echo "workflow_run 触发，使用 Prepare run #$PREP_RUN_ID"
+          else
+            # 手动/定时/dispatch: 找最新成功的 Prepare run
+            PREP_RUN_ID=$(gh api "repos/${{ github.repository }}/actions/workflows/Prepare_Build_Environment.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].id' 2>/dev/null)
+            if [ -z "$PREP_RUN_ID" ] || [ "$PREP_RUN_ID" = "null" ]; then
+              echo "::warning::没有成功的 Prepare run，将走全量准备路径"
+              echo "prep_run_id=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "使用最近成功的 Prepare run #$PREP_RUN_ID"
+          fi
+          echo "prep_run_id=$PREP_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download prepared environment
+        if: env.SKIP_BUILD != 'true' && steps.locate_prep.outputs.prep_run_id != ''
+        uses: actions/download-artifact@main
+        with:
+          name: prep-env
+          path: prep
+          run-id: ${{ steps.locate_prep.outputs.prep_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Restore prepared environment
+        if: env.SKIP_BUILD != 'true' && steps.locate_prep.outputs.prep_run_id != ''
+        run: |
+          if [ -f prep/prep-env.tgz ]; then
+            echo "✅ 已下载 prep-env.tgz ($(ls -lh prep/prep-env.tgz | awk '{print $5}'))"
+            echo "根分区: $(df -h / | tail -1 | awk '{print "可用 "$4" / 总量 "$2}')"
+            echo "workspace: $(df -h "$GITHUB_WORKSPACE" | tail -1 | awk '{print "可用 "$4" / 总量 "$2}')"
+            # 解压必须成功：禁止静默吞错（曾因 || true 掩盖解压失败导致 softcenter 缺失）
+            # 重要：toolchains 解压到 workspace（101G LVM 卷），不在 $HOME（根分区 maximize 后仅剩 2-4G）
+            tar xzf prep/prep-env.tgz -C "$GITHUB_WORKSPACE" toolchains
+            echo "toolchains 解压完成，根分区: $(df -h / | tail -1 | awk '{print "可用 "$4}')"
+            # $HOME/toolchains 软链到 workspace，Setup toolchains 的 $HOME 引用不变
+            rm -rf "$HOME/toolchains" 2>/dev/null || true
+            ln -sfn "$GITHUB_WORKSPACE/toolchains" "$HOME/toolchains"
+            tar xzf prep/prep-env.tgz -C "$GITHUB_WORKSPACE" asuswrt-bcm prep-source-rev.txt
+            echo "asuswrt-bcm 解压完成，根分区: $(df -h / | tail -1 | awk '{print "可用 "$4}')"
+            rm -f prep/prep-env.tgz   # 释放 4.2G，为编译腾空间
+            echo "已删除 prep-env.tgz，根分区: $(df -h / | tail -1 | awk '{print "可用 "$4}')"
+            # 完整性校验：目录存在 ≠ 内容完整（曾出现目录在但 softcenter 缺失）
+            if [ -d "$HOME/toolchains/bcmhnd" ] && [ -d "$GITHUB_WORKSPACE/asuswrt-bcm" ]; then
+              if [ -f "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/softcenter/Softcenter.asp" ]; then
+                echo "PREP_RESTORED=true" >> "$GITHUB_ENV"
+                echo "source_rev=$(cat prep-source-rev.txt 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
+                echo "✅ 环境恢复成功（含 softcenter）"
+              else
+                echo "::error::恢复的源码缺少 softcenter（prep-env.tgz 打包不完整？），检查 Prepare 打包"
+                ls "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/" | head -5 || true
+                exit 1
+              fi
+            else
+              echo "::error::环境恢复不完整（toolchains 或 asuswrt-bcm 缺失）"
+              exit 1
+            fi
+          else
+            echo "::warning::prep-env.tgz 不存在，将走全量准备路径"
+          fi
+
+      # ===== 全量准备路径（无 prep artifact 时兜底）=====
+      - name: Install dependencies (fallback)
+        if: env.SKIP_BUILD != 'true' && env.PREP_RESTORED != 'true'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo -E apt-get -y purge azure-cli* docker* ghc* llvm* 2>/dev/null || true
+          sudo dpkg --add-architecture i386 2>/dev/null || true
+          sudo -E apt-get -qq update || sudo -E apt-get -qq update
+          for pkg in \
+            build-essential flex bison gawk git wget patch unzip texinfo gettext \
+            autoconf automake libtool libtool-bin pkg-config gperf bzip2 xz-utils \
+            make m4 perl python3 python3-pip rsync bc file cmake \
+            g++-multilib gcc-multilib libncurses-dev zlib1g-dev libssl-dev \
+            liblzo2-dev uuid-dev libelf-dev libxml2-dev libglib2.0-dev libltdl-dev \
+            libexpat1-dev libvorbis-dev lib32z1-dev lib32stdc++6 lib32gcc-s1 \
+            libc6-dev-i386 xsltproc gtk-doc-tools intltool autopoint autogen \
+            autoconf-archive sharutils dos2unix 7zip msmtp xmlto qemu-utils \
+            upx-ucl device-tree-compiler antlr3 lzip patchelf libproxy-dev \
+            gengetopt binutils-dev curl zip sudo xxd binutils libz-dev libslang2 \
+            groff-base diffutils sed mtd-utils subversion asciidoc libncurses5-dev; do
+            sudo apt-get install -y "$pkg" >/dev/null 2>&1 || echo "跳过: $pkg"
+          done
+          for must in build-essential flex bison gawk git liblzo2-dev libncurses-dev zlib1g-dev libssl-dev; do
+            dpkg -s "$must" >/dev/null 2>&1 || { echo "::error::关键依赖未安装: $must"; exit 1; }
+          done
+          sudo ln -sf /bin/bash /bin/sh
+          test -f /usr/include/lzo/lzo1x.h || { echo "::error::lzo1x.h 缺失"; exit 1; }
+
+      - name: Fetch toolchains (fallback)
+        if: env.SKIP_BUILD != 'true' && env.PREP_RESTORED != 'true'
+        run: |
+          set -o pipefail
+          mkdir -p "$HOME/toolchains"
+          for attempt in 1 2 3; do
+            if git clone --depth 1 --no-checkout --single-branch \
+                https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd" 2>&1 | tail -2 \
+               && git -C "$HOME/toolchains/bcmhnd" archive --format=tar HEAD 2>/dev/null | tar x -C "$HOME/toolchains/bcmhnd"; then
+              rm -rf "$HOME/toolchains/bcmhnd/.git"; break
+            fi
+            rm -rf "$HOME/toolchains/bcmhnd"; sleep 5
+          done
+          for attempt in 1 2 3; do
+            if git clone --depth 1 --no-checkout --single-branch \
+                https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm" 2>&1 | tail -2 \
+               && git -C "$HOME/toolchains/bcm" archive --format=tar HEAD 2>/dev/null | tar x -C "$HOME/toolchains/bcm"; then
+              rm -rf "$HOME/toolchains/bcm/.git"; break
+            fi
+            rm -rf "$HOME/toolchains/bcm"; sleep 5
+          done
+          test -d "$HOME/toolchains/bcmhnd/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1" \
+            || { echo "::error::bcmhnd 工具链缺失"; exit 1; }
+          test -d "$HOME/toolchains/bcm/hndtools-arm-linux-2.6.36-uclibc-4.5.3" \
+            || { echo "::error::bcm 工具链缺失"; exit 1; }
+
+      - name: Clone source (fallback)
+        if: env.SKIP_BUILD != 'true' && env.PREP_RESTORED != 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            if git clone --depth 1 --single-branch --branch "$REPO_BRANCH" "$REPO_URL" asuswrt-bcm 2>&1 | tail -2; then
+              break
+            fi
+            rm -rf asuswrt-bcm; sleep 5
+          done
+          test -d asuswrt-bcm/.git || { echo "::error::源码克隆失败"; exit 1; }
+
+      - name: Patch source for XD4 (fallback)
+        if: env.SKIP_BUILD != 'true' && env.PREP_RESTORED != 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          bash "$GITHUB_WORKSPACE/custom_scripts/patch_xd4_source.sh" "$GITHUB_WORKSPACE/asuswrt-bcm"
+
+      # ===== 关键宿主开发库（prep 恢复路径也要装：prebuild_checks 检查
+      #       lzo/uuid/ncurses 等头文件，fallback 路径有安装但恢复路径没有）=====
+      - name: Install host dev libraries
+        if: env.SKIP_BUILD != 'true'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get -qq update || sudo apt-get -qq update
+          for pkg in liblzo2-dev uuid-dev libncurses-dev zlib1g-dev libssl-dev \
+                     libxml2-dev libltdl-dev libexpat1-dev libglib2.0-dev \
+                     libvorbis-dev lib32z1-dev lib32stdc++6 lib32gcc-s1 \
+                     libc6-dev-i386 libelf-dev libslang2 gengetopt \
+                     gettext gettext-base autopoint \
+                     xsltproc xmlto gtk-doc-tools intltool autogen \
+                     autoconf-archive sharutils dos2unix 7zip msmtp \
+                     gperf flex bison; do
+            sudo apt-get install -y "$pkg" >/dev/null 2>&1 || echo "跳过: $pkg"
+          done
+          for must in liblzo2-dev uuid-dev libncurses-dev zlib1g-dev libssl-dev gettext xsltproc; do
+            dpkg -s "$must" >/dev/null 2>&1 || { echo "::error::关键依赖未安装: $must"; exit 1; }
+          done
+          command -v msgfmt >/dev/null 2>&1 || { echo "::error::msgfmt 缺失（gettext）"; exit 1; }
+          command -v xsltproc >/dev/null 2>&1 || { echo "::error::xsltproc 缺失"; exit 1; }
+          test -f /usr/include/lzo/lzo1x.h || { echo "::error::lzo1x.h 缺失"; exit 1; }
+          echo "✅ 宿主开发库就绪"
+
+      - name: Setup toolchains
+        if: env.SKIP_BUILD != 'true'
+        run: |
+          # prebuild_checks 要求 /bin/sh 指向 bash（Ubuntu 默认 dash 会导致
+          # "ERROR: /bin/sh does not invoke bash shell"；fallback 路径有但
+          # prep-env 恢复路径没有执行过）
+          sudo ln -sf /bin/bash /bin/sh
+          sudo mkdir -p /opt/toolchains /projects/bca/tools/linux/bin
+          sudo chown -R $USER /opt/toolchains /projects
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.3-linux-4.1-glibc-2.24-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-5.3-linux-4.1-glibc-2.24-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-gcc-5.3-linux-4.1-uclibc-1.0.12-glibc-2.24-binutils-2.25 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-aarch64-gcc-9.2-linux-4.19-glibc-2.30-binutils-2.32 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcmhnd"/crosstools-arm-gcc-9.2-linux-4.19-glibc-2.30-binutils-2.32 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcm"/hndtools-arm-linux-2.6.36-uclibc-4.5.3 /opt/toolchains/
+          ln -sf "$HOME/toolchains/bcm"/hndtools-armeabi-2013.11 /projects/bca/tools/linux/
+          ln -sf "$HOME/toolchains/bcm"/fwtag.ini /projects/bca/tools/linux/bin/
+          ln -sf /projects/bca /projects/hnd
+          echo "TOOLCHAIN_BASE=/opt/toolchains" >> "$GITHUB_ENV"
+          ls /opt/toolchains/ | wc -l | xargs echo "toolchain links:"
+
+      - name: Verify softcenter in source
+        if: env.SKIP_BUILD != 'true'
+        working-directory: ${{ github.workspace }}/asuswrt-bcm
+        run: |
+          if [ -f "release/src/router/softcenter/Softcenter.asp" ] && [ -d "release/src/router/softcenter/softcenter" ]; then
+            echo "✅ 软件中心已确认在源码中"
+          else
+            echo "::error::软件中心源码缺失！"
+            exit 1
+          fi
+
+      # ===== 内核构建目录增量缓存（key 含上游 commit，源码变化自动失效）=====
+      - name: Compute source revision
+        if: env.SKIP_BUILD != 'true'
+        id: source_rev
+        run: |
+          if [ -f prep-source-rev.txt ]; then
+            REV=$(cat prep-source-rev.txt)
+          else
+            REV=$(git -C asuswrt-bcm rev-parse HEAD 2>/dev/null || echo unknown)
+          fi
+          echo "source_rev=$REV" >> "$GITHUB_OUTPUT"
+          echo "source_rev_short=${REV:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache kernel build directory
+        if: env.SKIP_BUILD != 'true'
+        uses: actions/cache@main
+        with:
+          path: ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/bcmdrivers/broadcom/net/wl/impl69/main/src/linux/linux-4.1
+          key: merlin-kernel-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}
+          restore-keys: |
+            merlin-kernel-${{ env.REPO_BRANCH }}-
+          save-always: false
+
+      # ===== Phase1/Phase2 增量构建：恢复上次构建产物（phase1 已成功组件自动跳过）=====
+      # key 含 source_rev + patch 脚本 hash：上游或补丁变化 → cache miss → 全量重编（正确）
+      - name: Restore phase1 build tree (incremental)
+        if: env.SKIP_BUILD != 'true'
+        uses: actions/cache/restore@main
+        with:
+          path: ${{ github.workspace }}/asuswrt-bcm/release
+          key: merlin-buildtree-v2-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-${{ hashFiles('custom_scripts/patch_xd4_source.sh', 'custom_scripts/*.sh') }}
+
+      - name: Prepare incremental build (phase1 skip + phase2 failed component)
+        if: env.SKIP_BUILD != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE_DIR="$GITHUB_WORKSPACE/asuswrt-bcm/release"
+          # 1) 获取上次失败组件（phase2）：下载最近一次失败 Build run 的 error-log
+          FAILED_COMPONENT=""
+          PREV_FAIL=$(gh run list --workflow=Build_Merlin_Firmware.yml --status failure --limit 1 \
+            --json databaseId --jq '.[0].databaseId' 2>/dev/null || echo "")
+          if [ -n "$PREV_FAIL" ] && [ "$PREV_FAIL" != "${{ github.run_id }}" ]; then
+            mkdir -p /tmp/prev_err
+            gh run download "$PREV_FAIL" -n error-log -D /tmp/prev_err 2>/dev/null || true
+            FAILED_COMPONENT=$(grep -oP '(?<=^### 失败组件: ).*?(?= ###)' \
+              /tmp/prev_err/last_error.log 2>/dev/null | head -1 || true)
+          fi
+          # 2) 删除失败组件产物，强制 phase2 重编（make 增量对缺失产物自动重建）
+          #    重要: 必须排除 prebuild/ 目录--prebuild 下的 .o 是上游预编译产物
+          #    (private.o/nvpriv.o/bcmutils.o 等，源码树无对应 .c 文件)，不是编译输出。
+          #    误删会导致 "No rule to make target 'private.c', needed by 'private.o'"
+          #    因为 Makefile 的 ifneq($(wildcard ./prebuild/private.o)) 回退到 %.o:%.c。
+          if [ -n "$FAILED_COMPONENT" ] && [ -d "$RELEASE_DIR/src/router/$FAILED_COMPONENT" ]; then
+            echo "🔧 phase2: 强制重编失败组件 $FAILED_COMPONENT"
+            find "$RELEASE_DIR/src/router/$FAILED_COMPONENT" -type f \
+              \( -name '*.o' -o -name '*.a' -o -name '*.so' -o -name '*.lo' \) \
+              -not -path '*/prebuild/*' \
+              -delete 2>/dev/null || true
+          fi
+          # 3) 时间戳调整：只把产物 touch 到当前时间（比源码解压时间新），使 make 跳过 phase1
+          #    注意：绝不能 touch 未来时间戳（会触发 make Clock skew 导致生成步骤失效），
+          #    也绝不 touch 源码/Makefile/configure 脚本（会触发 autoconf/automake 重跑）
+          NOW_TS=$(date +%s)
+          PROD_TS=$((NOW_TS - 60))      # 产物 = 1 分钟前（比任何源码新即可）
+          if [ -d "$RELEASE_DIR" ]; then
+            find "$RELEASE_DIR/src-rt-5.02axhnd.675x" "$RELEASE_DIR/src/router" \
+              -type f \( -name '*.o' -o -name '*.a' -o -name '*.so' -o -name '*.ko' -o -name '*.lo' -o -name '*.d' -o -name '*.dep' -o -name '*.cmd' \) \
+              -exec touch -d "@$PROD_TS" {} + 2>/dev/null || true
+            echo "✅ 增量构建准备完成（产物→$PROD_TS，源码保持 prep 解压时间戳）"
+          else
+            echo "ℹ️ 无缓存产物，本次为全量构建（phase1 为空）"
+          fi
+
+      - name: Tmate SSH session (interactive build)
+        if: env.SKIP_BUILD != 'true'
+        timeout-minutes: 360
+        uses: mxschmitt/action-tmate@master
+        with:
+          limit-access-to-actor: true
+          detached: false
+          # 编译在外部 tmate SSH 会话中手动执行，断开后 tmate 结束。
+          # 手动编译命令（在 tmate 会话内执行）：
+          #   cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/src-rt-5.02axhnd.675x"
+          #   make rt-ax56_xd4 2>&1 | tee /tmp/build-tail.log
+          # 报错后读取 /tmp/build-tail.log 分析解决，成功后固件在
+          # release/src-rt-5.02axhnd.675x/images/ 下。
+
+      - name: Compute build info
+        if: env.SKIP_BUILD != 'true'
+        id: build_info
+        run: |
+          cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR"
+          # 文件名不含机型（IMGNAME=版本号格式），机型标识内嵌在 trx 头部 (trx_asus -r BUILD_NAME,...)
+          FW_FILE=$(ls image/*.trx 2>/dev/null | head -1)
+          echo "FW_FILE=$FW_FILE" >> "$GITHUB_ENV"
+          if [ -n "$FW_FILE" ] && grep -qa 'RT-AX56_XD4' "$FW_FILE"; then
+            FW_VERSION=$(basename "$FW_FILE" .trx)
+            echo "FW_VERSION=$FW_VERSION" >> "$GITHUB_ENV"
+            echo "找到固件: $FW_FILE (trx 头部含 RT-AX56_XD4)"
+          else
+            echo "::error::未找到 XD4 固件输出"
+            ls -la image/ 2>/dev/null || true
+            exit 1
+          fi
+
+      - name: Build Quality Gate
+        if: env.SKIP_BUILD != 'true'
+        id: quality_gate
+        env:
+          SOURCE: ${{ env.SOURCE }}
+          EXPECTED_MODEL_PATTERN: RT-AX56_XD4
+          MIN_FIRMWARE_SIZE_MB: 10
+        run: |
+          if python3 "$GITHUB_WORKSPACE/custom_scripts/validate_build_output.py" --gate; then
+            echo "gate_result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "gate_result=fail" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Generate checksums and info
+        if: env.SKIP_BUILD != 'true'
+        run: |
+          cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR"
+          sha256sum "image/$(basename "$FW_FILE")" > "image/$(basename "$FW_FILE").sha256"
+          {
+            echo "固件: $(basename "$FW_FILE")"
+            echo "来源: $SOURCE"
+            echo "上游: $REPO_URL @ $REPO_BRANCH (${{ steps.source_rev.outputs.source_rev_short }})"
+            echo "构建时间: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %Z')"
+            echo "软件中心: 已集成 (release/src/router/softcenter)"
+            echo "SHA256: $(cat image/$(basename "$FW_FILE").sha256 | awk '{print $1}')"
+          } > firmware-info.txt
+          cp firmware-info.txt "$GITHUB_WORKSPACE/firmware-info.txt"
+          cat "$GITHUB_WORKSPACE/firmware-info.txt"
+
+      - name: Upload firmware artifact
+        if: env.SKIP_BUILD != 'true'
+        uses: actions/upload-artifact@main
+        with:
+          name: Merlin_XD4_${{ env.FW_VERSION }}_${{ github.run_number }}
+          path: |
+            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.trx
+            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.sha256
+            ${{ github.workspace }}/firmware-info.txt
+            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/build.log
+          retention-days: 14
+
+      # ===== Phase1 固化：无论成败都保存构建产物（失败时保存已成功组件，供下次增量）=====
+      - name: Save phase1 build tree (incremental cache)
+        if: ${{ always() && !cancelled() && env.SKIP_BUILD != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@main
+        with:
+          path: ${{ github.workspace }}/asuswrt-bcm/release
+          key: merlin-buildtree-v2-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-${{ hashFiles('custom_scripts/patch_xd4_source.sh', 'custom_scripts/*.sh') }}
+
+      - name: Publish release
+        if: env.SKIP_BUILD != 'true' && steps.quality_gate.outputs.gate_result == 'pass'
+        id: publish_release
+        uses: softprops/action-gh-release@master
+        with:
+          files: |
+            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.trx
+            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.sha256
+            ${{ github.workspace }}/firmware-info.txt
+          name: ${{ env.FW_VERSION }}
+          tag_name: Merlin_XD4_${{ env.FW_VERSION }}_${{ github.run_number }}
+          body: |
+            华硕 ZenWiFi XD4 梅林固件 (SWRT/MerlinR 386 分支, 内置软件中心)
+            - 固件: `${{ env.FW_VERSION }}.trx`
+            - 来源: ${{ env.SOURCE }} @ ${{ steps.source_rev.outputs.source_rev_short }}
+            - 软件中心: 已集成，刷机后可安装第三方插件（fancyss 等）
+            - 刷机: 路由器管理页 → 系统管理 → 固件升级 → 选择 .trx 文件
+
+      - name: Cleanup old releases
+        if: env.SKIP_BUILD != 'true' && steps.publish_release.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 custom_scripts/cleanup_releases.py --prefix "Merlin_XD4_" --keep 3
+
+      - name: Extract Error Log
+        if: failure()
+        run: |
+          python3 custom_scripts/extract_last_error.py --log "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR/build.log" --output last_error.log || true
+          tail -n 5000 "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR/build.log" > build-tail.log 2>/dev/null || true
+          if [ ! -s last_error.log ]; then
+            echo "=== 兜底: 构建日志尾部 ===" > last_error.log
+            tail -n 100 "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR/build.log" >> last_error.log 2>/dev/null || true
+          fi
+
+      - name: Upload Error Log Artifact
+        uses: actions/upload-artifact@main
+        if: failure()
+        with:
+          name: error-log
+          path: |
+            last_error.log
+            build-tail.log
+            bluez-config.log
+          retention-days: 7
