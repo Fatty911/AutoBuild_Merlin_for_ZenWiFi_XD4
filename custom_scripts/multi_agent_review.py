@@ -200,7 +200,7 @@ def call_review_model(model_config, prompt):
     }
 
     try:
-        resp = requests.post(url, headers=headers, json=data, timeout=120)
+        resp = requests.post(url, headers=headers, json=data, timeout=300)
         if resp.status_code != 200:
             return {"model": name, "passed": None, "reason": f"HTTP {resp.status_code}: {resp.text[:200]}"}
 
