@@ -15,6 +15,11 @@ ERROR_PATTERNS = [
     re.compile(r"\*\*\*.*(?:No rule to make target|recipe for target).*failed"),
     re.compile(r"(?:fatal error|undefined reference|No such file|command not found)",
                re.IGNORECASE),
+    # 现代 GCC/Clang 错误格式: file.c:line:col: error: message
+    # 旧 patterns 只匹配 cc1:/collect2: 前缀的链接器错误，漏掉普通编译错误
+    # (如 "rc.c:123:45: error: 'foo' undeclared")，导致 find_first_error_in_range
+    # 返回 -1，"失败组件实际错误段" 缺失，last_error.log 只剩 make 错误链。
+    re.compile(r":\d+:\d+:\s*(?:error|fatal error):"),
     re.compile(r"make\[\d+\]: \*\*\*"),
     re.compile(r"configure: error"),
     re.compile(r"cc1?:?\s*(?:error|fatal)"),

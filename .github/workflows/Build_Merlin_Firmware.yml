@@ -424,7 +424,7 @@ jobs:
             for cl in $(find "$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router" -maxdepth 2 -name config.log 2>/dev/null | grep -v "bluez-5.56"); do
               echo "" >> build.log
               echo "=== CONFIG_LOG: $cl ===" >> build.log
-              tail -n 40 "$cl" >> build.log
+              tail -n 80 "$cl" >> build.log
             done
             # 关键库缺失诊断（注意 bcm947622 是符号链接，find 必须 -L 跟随）
             echo "" >> build.log

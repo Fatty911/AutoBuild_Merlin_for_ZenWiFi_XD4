@@ -172,9 +172,14 @@ fetch_config_sub() {
   if curl -fsSL --retry 3 --connect-timeout 20 -o "$dir/build-aux/config.sub" \
       https://raw.githubusercontent.com/gcc-mirror/gcc/master/config.sub 2>/dev/null; then
     curl -fsSL --retry 3 --connect-timeout 20 -o "$dir/build-aux/config.guess" \
-      https://raw.githubusercontent.com/gcc-mirror/gcc/master/config.guess 2>/dev/null || true
+        https://raw.githubusercontent.com/gcc-mirror/gcc/master/config.guess 2>/dev/null || true
     chmod +x "$dir/build-aux/config.sub" "$dir/build-aux/config.guess" 2>/dev/null || true
-    echo "✅ $dir: config.sub/config.guess 已更新 (gcc-mirror)"
+    # 老式 autoconf 包 (udev-173 等) 不设 AC_CONFIG_AUX_DIR([build-aux])，
+    # configure 在根目录查找 config.sub；仅放 build-aux/ 会导致 configure
+    # 用旧 config.sub -> configure: exit 1 -> libudev.so 缺失 -> rc 链接失败。
+    cp -f "$dir/build-aux/config.sub" "$dir/config.sub" 2>/dev/null || true
+    cp -f "$dir/build-aux/config.guess" "$dir/config.guess" 2>/dev/null || true
+    echo "✅ $dir: config.sub/config.guess 已更新 (gcc-mirror, build-aux + root)"
     return 0
   fi
   echo "::warning::$dir: config.sub 下载失败"
