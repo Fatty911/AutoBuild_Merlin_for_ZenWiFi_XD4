@@ -71,11 +71,61 @@ def find_failed_component(lines):
     return failed, phase1, last_dir
 
 
+def find_component_range(lines, component):
+    """定位组件在 build.log 中的构建输出范围 (Entering ... Leaving directory)。
+
+    并行 make (-jN) 下，rc 等大组件的 Entering/Leaving 之间可能间隔数千行，
+    实际编译/链接错误藏在其中，远早于最终的 ``make: *** Error 2`` 链。
+    返回 (enter_idx, leave_idx)；找不到返回 (-1, -1)。
+    """
+    if not component:
+        return -1, -1
+    enter_re = re.compile(
+        rf"Entering directory.*?/release/src/router/{re.escape(component)}['\"]"
+    )
+    leave_re = re.compile(
+        rf"Leaving directory.*?/release/src/router/{re.escape(component)}['\"]"
+    )
+    # 取最后一次 Entering（组件可能被多次进入），以及其后的首次 Leaving
+    enter_idx = -1
+    leave_idx = -1
+    for i, line in enumerate(lines):
+        if enter_re.search(line):
+            enter_idx = i
+        if leave_re.search(line) and enter_idx >= 0:
+            leave_idx = i
+            break
+    return enter_idx, leave_idx
+
+
+def find_first_error_in_range(lines, start, end):
+    """在 [start, end) 范围内查找首个真实错误行。
+
+    跳过 warning 行（cc1 warning 常含 "No such file"，非错误）和
+    ignored 行（make 的 "Error 1 (ignored)" 是被 - 前缀忽略的失败）。
+    限制搜索范围防止超大日志慢扫描。
+    """
+    if start < 0:
+        return -1
+    if end < 0 or end > len(lines):
+        end = len(lines)
+    search_end = min(end, start + 20000)
+    for i in range(start, search_end):
+        line = lines[i]
+        if "warning" in line.lower():
+            continue
+        if "ignored" in line.lower():
+            continue
+        if any(p.search(line) for p in ERROR_PATTERNS):
+            return i
+    return -1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--log", required=True)
     parser.add_argument("--output", default="last_error.log")
-    parser.add_argument("--max-chars", type=int, default=8000)
+    parser.add_argument("--max-chars", type=int, default=16000)
     args = parser.parse_args()
 
     log_path = Path(args.log)
@@ -89,36 +139,74 @@ def main() -> int:
         print("❌ 日志为空")
         return 1
 
-    # 找到最后一个错误行的位置
+    failed_comp, phase1_list, last_dir = find_failed_component(lines)
+
     last_err_idx = -1
     for i, line in enumerate(lines):
         if any(p.search(line) for p in ERROR_PATTERNS):
             last_err_idx = i
 
-    if last_err_idx < 0:
-        # 没有匹配到错误模式，取最后 100 行
-        start = max(0, total - 100)
-        context = lines[start:]
+    # 并行 make (-jN) 下，rc 等大组件的真正编译/链接错误可能比最终
+    # make: *** Error 2 链早数百甚至数千行（被其它文件的输出淹没）。
+    # 旧逻辑只取最后错误行前 30 行，在并行构建中几乎必定漏掉根因。
+    # 修复：在失败组件的 Entering..Leaving directory 范围内搜索首个真实错误。
+    first_err_idx = -1
+    if failed_comp:
+        enter_idx, leave_idx = find_component_range(lines, failed_comp)
+        if enter_idx >= 0:
+            first_err_idx = find_first_error_in_range(lines, enter_idx, leave_idx)
+
+    sections = []  # (title, start, end)
+
+    if first_err_idx >= 0 and (last_err_idx < 0 or first_err_idx < last_err_idx - 5):
+        s = max(0, first_err_idx - 25)
+        e = min(total, first_err_idx + 45)
+        sections.append(("失败组件实际错误段", s, e))
+
+    if last_err_idx >= 0:
+        s = max(0, last_err_idx - 10)
+        e = min(total, last_err_idx + 80)
+        sections.append(("Make 错误链", s, e))
     else:
-        start = max(0, last_err_idx - 30)
-        context = lines[start : min(total, last_err_idx + 80)]
+        sections.append(("日志尾部", max(0, total - 100), total))
 
-    text = "\n".join(context)
+    # 工作流追加的 stage 库检查常落在 +80 行窗口之外，单独截取；
+    # 若已在 Make 错误链段内则跳过（避免重复）
+    stage_idx = -1
+    for i, line in enumerate(lines):
+        if "=== stage 关键库检查 ===" in line:
+            stage_idx = i
+            break
+    if stage_idx >= 0:
+        in_chain = False
+        for _, cs, ce in sections:
+            if cs <= stage_idx < ce:
+                in_chain = True
+                break
+        if not in_chain:
+            sections.append(("Stage 库检查", stage_idx, min(total, stage_idx + 20)))
+
+    text_parts = []
+    for title, s, e in sections:
+        text_parts.append(f"=== {title} ===")
+        text_parts.append("\n".join(lines[s:e]))
+    text = "\n".join(text_parts)
+
     if len(text) > args.max_chars:
-        text = text[-args.max_chars:]
+        text = text[:args.max_chars]
 
-    # 失败组件定位（phase1/phase2 增量修复用）
-    failed_comp, phase1_list, last_dir = find_failed_component(lines)
     if failed_comp:
         header = f"### 失败组件: {failed_comp} ###\n"
         header += f"### PHASE1: {','.join(phase1_list) if phase1_list else '(无)'} ###\n"
         text = header + text
         print(f"🔧 失败组件: {failed_comp} (phase1={len(phase1_list)} 个组件已成功)")
+        if first_err_idx >= 0 and first_err_idx != last_err_idx:
+            print(f"🎯 定位到组件内首个错误: 行 {first_err_idx + 1}")
     elif last_dir:
         print(f"ℹ️ 最后进入组件目录: {last_dir}（未捕获错误行，按保守处理）")
 
     Path(args.output).write_text(text, encoding="utf-8")
-    print(f"✅ 已提取错误日志: {args.output} ({len(text)} chars, 行 {start}-{start + len(context)})")
+    print(f"✅ 已提取错误日志: {args.output} ({len(text)} chars)")
     return 0
 
 
