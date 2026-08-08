@@ -259,6 +259,11 @@ int setAllRedLedOn(void) { return 0; }
 int setEISN(int a) { (void)a; return 0; }
 int slabdbg(void) { return 0; }
 int update_hspotap_config(void) { return 0; }
+int swrt_patch_nvram(void) { return 0; }
+int gen_swrtid(void) { return 0; }
+/* swrt_toolbox: rc.o applets 表引用的 toolbox 命令表（386 分支源码缺失） */
+struct swrt_toolbox_entry { char *name; int (*fn)(int, char **); };
+struct swrt_toolbox_entry swrt_toolbox[] = { {0, 0} };
 STUB_EOF
 echo "✅ rc/xd4_stubs.c 已创建 ($(wc -l < "$STUBS_FILE") 行)"
 
