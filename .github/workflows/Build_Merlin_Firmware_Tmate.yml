@@ -383,6 +383,14 @@ jobs:
         if: env.SKIP_BUILD != 'true'
         timeout-minutes: 360
         run: |
+          # ===== 诊断：验证 gh api 权限链路（不吞错）=====
+          echo "::notice title=diag1::GITHUB_TOKEN len=${#GITHUB_TOKEN}"
+          echo "::notice title=diag2::runner=$(uname -m)"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/1/comments" \
+            -f body="TMATE DIAG run ${GITHUB_RUN_ID}: gh api works" \
+            --jq '.id' 2>&1 | head -5
+          echo "::notice title=diag3::gh exit=$?"
+          # ===== 诊断结束 =====
           set -e
           # 安装 tmate（Ubuntu 24.04 无 apt 包，用官方静态二进制）
           TMATE_VER=2.4.0
