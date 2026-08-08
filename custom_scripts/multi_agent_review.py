@@ -197,6 +197,9 @@ def call_review_model(model_config, prompt):
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.3,
+        # GLM-5.2/Kimi 等 reasoning 模型评审 8000 字符 diff 时 thinking 会耗尽
+        # 默认 max_tokens 导致 content 为空（"评审输出格式无效"）——显式给足
+        "max_tokens": 16000,
     }
 
     try:
