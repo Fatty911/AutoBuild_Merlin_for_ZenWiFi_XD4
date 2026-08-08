@@ -23,7 +23,11 @@ permissions:
   actions: read
 
 concurrency:
-  group: ai-auto-fix-${{ github.event.workflow_run.id || inputs.failed_run_id }}
+  # 与 Build workflow 共享组：AI Fix 与 Build 互斥，不能同时运行
+  # （AI Fix 依赖 Build 的 error-log artifact 且修复会触发新的 Prepare→Build，
+  #   并发会导致修复基于过期失败状态或互相踩踏）
+  # cancel-in-progress: false → 后来的排队等待，不 cancel 正在跑的
+  group: build-merlin-firmware
   cancel-in-progress: false
 
 jobs:

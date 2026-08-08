@@ -32,8 +32,12 @@ on:
     - cron: '0 */12 * * *'
 
 concurrency:
+  # 与 AI Auto Fix Monitor 共享组：Build 与 AI Fix 互斥，不能同时运行
+  # （AI Fix 依赖 Build 的 error-log artifact，且修复会触发新的 Prepare→Build；
+  #   Build 若 cancel-in-progress: true 会误杀正在跑的 AI Fix 修复轮）
+  # false → 后来的排队等待，不 cancel 正在跑的
   group: build-merlin-firmware
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   TZ: Asia/Shanghai
