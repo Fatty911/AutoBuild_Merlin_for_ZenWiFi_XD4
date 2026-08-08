@@ -29,7 +29,9 @@ def find_failed_component(lines):
     失败组件的标志是：进入后出现了 error/failed 行。若无法定位返回 None。
     同时返回该组件之前的所有成功组件（phase1 列表）。
     """
-    comp_re = re.compile(r"Entering directory.*?/release/src/router/([^/'\"]+)")
+    comp_re = re.compile(r"Entering directory.*?/release/src/router/([^/'\"']+)")
+    needed_re = re.compile(r"needed by '([^']+)'")
+    makefile_re = re.compile(r"\[Makefile:\d+: ([A-Za-z0-9_]+)\] Error")
     visited = []          # 进入顺序
     last_dir = None
     last_dir_idx = -1
@@ -42,12 +44,26 @@ def find_failed_component(lines):
                 visited.append(comp)
             last_dir = comp
             last_dir_idx = i
-        elif last_dir and (last_dir_idx >= 0) and (i - last_dir_idx <= 200):
+        elif last_dir and (last_dir_idx >= 0) and (i - last_dir_idx <= 5000):
             if "warning" in line.lower():
                 continue  # cc1: warning 常含 "No such file"（-I 目录缺失），非错误
+            if "ignored" in line.lower():
+                continue  # make 的 "Error 1 (ignored)" 是被 - 前缀忽略的失败，非真失败
+            # 优先从错误行直接提取组件名："No rule to make target 'xxx.o', needed
+            # by 'rc'" → rc；"[Makefile:3256: rc] Error 2" → rc。比目录跟踪更可靠
+            # （rc 并行编译时 Entering directory 与最终错误可能间隔上千行）。
+            nm = needed_re.search(line)
+            if nm and nm.group(1) in visited:
+                failed = nm.group(1)
+                continue
+            mm = makefile_re.search(line)
+            if mm and mm.group(1) in visited:
+                failed = mm.group(1)
+                continue
             if any(p.search(line) for p in ERROR_PATTERNS):
+                # 不立即 break：日志可能先出现 ignored/早期错误，取最后一个真错误
+                # 对应的组件（首个匹配可能是 shared 等组件的非致命错误）
                 failed = last_dir
-                break
     if failed and failed in visited:
         phase1 = visited[: visited.index(failed)]
     else:
