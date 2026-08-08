@@ -113,10 +113,14 @@ fi
 # s46map_rptd.o)；RT-AX55 (同平台 947622GW/675x，$(HND-947622_BASE_NOUSB)) 的
 # rc/prebuild 含全部 4 个 -> 从 RT-AX55 补齐。
 # 修复: "No rule to make target 's46comm.o', needed by 'rc'" 及后续 v6plusd/ocnvc/dslite。
+# gpy211_war.o: XD4 启用 HND_ROUTER_AX_675X=y (-> RTCONFIG_HND_ROUTER_AX)，rc/Makefile
+# (OBJS line 799) 把它加入 rc 链接，同样依赖 ./prebuild/gpy211_war.o 的 wildcard 规则；
+# RT-AX56U 的 rc/prebuild 缺该文件，RT-AX55 (同平台 947622GW/675x) 含 -> 一并从 RT-AX55 补齐。
+# 修复: "No rule to make target 'gpy211_war.o', needed by 'rc'"。
 # 双保险: 同时放入 RT-AX56_XD4 机型目录 (构建系统按 BUILD_NAME staging) 与根 prebuild
 # (Makefile wildcard ./prebuild/<name>.o 直接命中)，与 amas_wgn_shared.o 处理方式一致。
 RC_PREBUILD="release/src/router/rc/prebuild"
-for s46obj in s46comm.o v6plusd.o ocnvcd.o dslited.o; do
+for s46obj in s46comm.o v6plusd.o ocnvcd.o dslited.o gpy211_war.o; do
   SRC_O=$(find "$RC_PREBUILD" -name "$s46obj" 2>/dev/null | head -1)
   if [ -n "$SRC_O" ]; then
     # 机型目录 (构建系统按 BUILD_NAME 拷贝 prebuild 子目录到根)
