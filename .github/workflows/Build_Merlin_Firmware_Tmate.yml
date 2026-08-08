@@ -381,16 +381,49 @@ jobs:
       - name: Tmate SSH session (interactive build)
         if: env.SKIP_BUILD != 'true'
         timeout-minutes: 360
-        uses: mxschmitt/action-tmate@master
-        with:
-          limit-access-to-actor: true
-          detached: false
-          # 编译在外部 tmate SSH 会话中手动执行，断开后 tmate 结束。
+        run: |
+          set -e
+          # 安装 tmate（Ubuntu 24.04 无 apt 包，用官方静态二进制）
+          TMATE_VER=2.4.0
+          curl -fsSL -o /tmp/tmate.tar.xz \
+            "https://github.com/tmate-io/tmate/releases/download/${TMATE_VER}/tmate-${TMATE_VER}-static-linux-amd64.tar.xz"
+          tar -xJf /tmp/tmate.tar.xz -C /tmp
+          TMATE_BIN=$(find /tmp -name tmate -type f | head -1)
+          echo "tmate bin: $TMATE_BIN"
+
+          # 生成临时 SSH key（tmate 需要私钥；web 链接无需 key 即可浏览器访问）
+          ssh-keygen -t ed25519 -N "" -f /tmp/tmate_key -q
+          export TMATE_SSH_KEY=/tmp/tmate_key
+
+          # 前台启动 tmate，日志 tee 到文件（-F 保持会话直到断开）
+          "$TMATE_BIN" -F -n github 2>&1 | tee /tmp/tmate.log &
+          TMATE_PID=$!
+
+          # 等待 web session 链接出现（最长 120s）
+          WEB=""
+          for i in $(seq 1 60); do
+            WEB=$(grep -oE 'https://tmate\.io/t/[A-Za-z0-9]+' /tmp/tmate.log 2>/dev/null | head -1)
+            [ -n "$WEB" ] && break
+            sleep 2
+          done
+          SSH_LINE=$(grep -oE 'ssh [A-Za-z0-9]+@ssh\.tmate\.io' /tmp/tmate.log 2>/dev/null | head -1 || true)
+          if [ -n "$WEB" ]; then
+            echo "::notice title=tmate web session::$WEB"
+            echo "::notice title=tmate ssh::$SSH_LINE"
+            echo "✅ tmate 已就绪: $WEB"
+          else
+            echo "::warning::tmate web 链接未在 120s 内出现，日志如下："
+            cat /tmp/tmate.log || true
+          fi
+
+          # 保持会话存活直到外部断开/超时（tmate -F 前台运行，wait 等它）
           # 手动编译命令（在 tmate 会话内执行）：
           #   cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/src-rt-5.02axhnd.675x"
           #   make rt-ax56_xd4 2>&1 | tee /tmp/build-tail.log
           # 报错后读取 /tmp/build-tail.log 分析解决，成功后固件在
           # release/src-rt-5.02axhnd.675x/images/ 下。
+          wait $TMATE_PID || true
+          echo "tmate 会话结束"
 
       - name: Compute build info
         if: env.SKIP_BUILD != 'true'
