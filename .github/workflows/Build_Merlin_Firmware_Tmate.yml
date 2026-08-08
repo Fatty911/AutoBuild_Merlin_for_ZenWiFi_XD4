@@ -411,6 +411,9 @@ jobs:
             echo "::notice title=tmate web session::$WEB"
             echo "::notice title=tmate ssh::$SSH_LINE"
             echo "✅ tmate 已就绪: $WEB"
+            # 双保险：把链接写入 issue #1 评论（GitHub API 实时可读，
+            # 运行中日志/annotations 可能不可用）
+            gh api "repos/${GITHUB_REPOSITORY}/issues/1/comments"               -f body="TMATE WEB: $WEB"               --jq '.id' 2>/dev/null && echo "✅ tmate 链接已写入 issue #1" || echo "::warning::写入 issue 失败（gh 权限不足？）"
           else
             echo "::warning::tmate web 链接未在 120s 内出现，日志如下："
             cat /tmp/tmate.log || true
