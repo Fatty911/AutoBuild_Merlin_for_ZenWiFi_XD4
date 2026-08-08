@@ -446,14 +446,31 @@ jobs:
               --jq '.id' 2>/dev/null || true
           fi
 
+          # ===== 自动启动编译（不依赖交互；tmate.io 故障时 SSH/web 输入不可用，
+          #      但输出通道可用——SSH 连接后 tail /tmp/build-tail.log 观察进度）=====
+          BUILD_LOG=/tmp/build-tail.log
+          cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/src-rt-5.02axhnd.675x" || cd "$GITHUB_WORKSPACE"
+          git config --global user.name "Fatty911" 2>/dev/null || true
+          git config --global user.email "xuerui911@gmail.com" 2>/dev/null || true
+          echo "=== 自动编译启动: $(date -u) ===" > "$BUILD_LOG"
+          if [ -f Makefile ]; then
+            (set -o pipefail; make rt-ax56_xd4 >> "$BUILD_LOG" 2>&1; echo "=== BUILD EXIT: $? ===" >> "$BUILD_LOG") &
+            echo "✅ 编译已在后台启动，日志: $BUILD_LOG"
+          else
+            echo "::warning::Makefile 不存在（SDK 目录不对？），跳过自动编译"
+            ls -d "$GITHUB_WORKSPACE"/asuswrt-bcm/release/src-rt-*/ 2>/dev/null || true
+          fi
           # 保持会话存活直到外部断开/超时（tmate -F 前台运行，wait 等它）
-          # 手动编译命令（在 tmate 会话内执行）：
+          # 手动编译命令（在 tmate 会话内执行，tmate.io 恢复后可用）：
           #   cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/src-rt-5.02axhnd.675x"
           #   make rt-ax56_xd4 2>&1 | tee /tmp/build-tail.log
           # 报错后读取 /tmp/build-tail.log 分析解决，成功后固件在
           # release/src-rt-5.02axhnd.675x/images/ 下。
           wait $TMATE_PID || true
           echo "tmate 会话结束"
+          # 会话结束后如果编译还在跑，等它完成
+          wait || true
+          tail -5 "$BUILD_LOG" 2>/dev/null || true
 
       - name: Compute build info
         if: env.SKIP_BUILD != 'true'
