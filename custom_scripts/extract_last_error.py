@@ -20,6 +20,9 @@ ERROR_PATTERNS = [
     # (如 "rc.c:123:45: error: 'foo' undeclared")，导致 find_first_error_in_range
     # 返回 -1，"失败组件实际错误段" 缺失，last_error.log 只剩 make 错误链。
     re.compile(r":\d+:\d+:\s*(?:error|fatal error):"),
+    # 老 GCC/部分工具只输出 file:line: error: (无列号)，如 ld 报告的
+    # "foo.c:123: error: undefined reference to 'bar'"，需单独匹配。
+    re.compile(r":\d+:\s*(?:error|fatal error):"),
     re.compile(r"make\[\d+\]: \*\*\*"),
     re.compile(r"configure: error"),
     re.compile(r"cc1?:?\s*(?:error|fatal)"),
@@ -91,15 +94,18 @@ def find_component_range(lines, component):
     leave_re = re.compile(
         rf"Leaving directory.*?/release/src/router/{re.escape(component)}['\"]"
     )
-    # 取最后一次 Entering（组件可能被多次进入），以及其后的首次 Leaving
+    # 取最后一对完整的 Entering/Leaving（组件可能被多次进入，如先构建依赖
+    # 再构建主目标；错误通常在最后一次进入时发生）。旧逻辑在首个 Leaving
+    # 后 break，若组件被多次进入则只覆盖第一次的范围，漏掉后续进入中的错误。
     enter_idx = -1
     leave_idx = -1
+    last_enter = -1
     for i, line in enumerate(lines):
         if enter_re.search(line):
-            enter_idx = i
-        if leave_re.search(line) and enter_idx >= 0:
+            last_enter = i
+        if leave_re.search(line) and last_enter >= 0:
+            enter_idx = last_enter
             leave_idx = i
-            break
     return enter_idx, leave_idx
 
 
@@ -169,7 +175,10 @@ def main() -> int:
         sections.append(("失败组件实际错误段", s, e))
 
     if last_err_idx >= 0:
-        s = max(0, last_err_idx - 10)
+        # 嵌套 make (make[5]..make[1]) 的错误链本身就有 10+ 行，-10 窗口
+        # 刚好从链尾的 gcc caret (^) 开始，漏掉前面的 file:line:col: error:
+        # 消息行和源码行。-30 确保完整 gcc 诊断段（消息+源码+caret+notes）被捕获。
+        s = max(0, last_err_idx - 30)
         e = min(total, last_err_idx + 80)
         sections.append(("Make 错误链", s, e))
     else:
