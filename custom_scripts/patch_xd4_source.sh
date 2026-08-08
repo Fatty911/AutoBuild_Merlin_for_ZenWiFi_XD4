@@ -27,7 +27,7 @@ else
 export HND-947622_BASE := HND_ROUTER=y HND_ROUTER_AX_675X=y PROFILE="947622GW" SAMBA3="3.6.x" OOKLA=y WL_SCHED_V3=y CABLEDIAG=y SOFTCENTER=y UBI=y UBIFS=y PSISTLOG=y SMARTDNS=y CIFS=y SWRT=y ENTWARE=y CAPTCHA=y
 export HND-947622_BASE_NOUSB := HND_ROUTER=y HND_ROUTER_AX_675X=y PROFILE="947622GW" WL_SCHED_V3=y OOKLA=y CABLEDIAG=y SOFTCENTER=y UBI=y UBIFS=y PSISTLOG=y SMARTDNS=y CIFS=y SWRT=y CAPTCHA=y
 export RT-AX56_XD4 := $(HND-947622_BASE_NOUSB)
-export RT-AX56_XD4 += BUILD_NAME="RT-AX56_XD4" NVSIZE="128" DHDAP=y HND_WL=y DPSTA=y LACP=n WTFAST=n REPEATER=y DISABLE_REPEATER_UI=y DISABLE_PROXYSTA_UI=y IPV6SUPP=y HTTPS=y ARM=y AUTODICT=y BBEXTRAS=y USBEXTRAS=y EBTABLES=y MEDIASRV=n MODEM=n PARENTAL2=y ACCEL_PPTPD=y PRINTER=n WEBDAV=n SMARTSYNCBASE=n USB="USB" APP="none" PROXYSTA=y DNSMQ=y SHP=n BCMWL6=y BCMWL6A=y DISK_MONITOR=n BTN_WIFITOG=n OPTIMIZE_XBOX=y ODMPID=y LED_BTN=n BCMSMP=y XHCI=n DUALWAN=n  NEW_USER_LOW_RSSI=y OPENVPN=y TIMEMACHINE=n MDNS=y VPNC=y BRCM_NAND_JFFS2=y JFFS2LOG=y BWDPI=y DUMP_OOPS_MSG=n LINUX_MTD="64" DEBUGFS=y TEMPROOTFS=n SSH=y EMAIL=y FRS_FEEDBACK=y SYSSTATE=y ROG=n STAINFO=y CLOUDCHECK=n NATNL_AICLOUD=n REBOOT_SCHEDULE=y MULTICASTIPTV=y QUAGGA=y WLCLMLOAD=n BCM_MUMIMO=y LAN50="all" ATCOVER=y GETREALIP=y CFEZ=y ETLAN_LED=n TFAT=n NTFS="" HFS="" NEWSSID_REV2=y NEWSSID_REV4=y NEWSSID_REV5=y NEW_APP_ARM=y VISUALIZATION=n BONDING=n BONDING_WAN=n NETOOL=y TRACEROUTE=y FORCE_AUTO_UPGRADE=y ALEXA=y IFTTT=y SW_HW_AUTH=y ASPMD=n BCM_MEVENT=n BCM_APPEVENTD=n LETSENCRYPT=y VPN_FUSION=y JFFS_NVRAM=y NVRAM_ENCRYPT=y IPSEC=STRONGSWAN IPSEC_SRVCLI_ONLY=SRV NATNL_AIHOME=n BCM_CEVENTD=y UTF8_SSID=y AMAS=y DWB=y DBLOG=y ETHOBD=y CONNDIAG=y NFCM=n CRASHLOG=y WATCH_REINIT=y BW160M=n BRCM_HOSTAPD=y TCPLUGIN=y UUPLUGIN=y IPERF3=y INFO_EXAP=y FRS_LIVE_UPDATE=y AVBLCHAN=y NO_SAMBA=y NO_FTP=y NO_USBSTORAGE=y BCM_CLED=y SINGLE_LED=y BHCOST_OPT=y AMAS_WGN=y AMAZON_WSS=y AHS=y ASD=y INTERNETCTRL=y SW_CTRL_ALLLED=y HSPOT=y BCN_RPT=y BTM_11V=y BCMEVENTD=y PORT2_DEVICE=y URLFW=y AMAS_SYNC_2G_BW=y INSTANT_GUARD=y AMAS_ETHDETECT=y ACL96=y IPV6S46=y OCNVC=y GOOGLE_ASST=y ASUSCTRL=y WIREGUARD=y CALC_NVRAM=y COMFW=y SWRT_VER_MAJOR="R" SWRT_VER_MINOR="5.2.9" SWRT_NAME="RTAX56XD4"
+export RT-AX56_XD4 += BUILD_NAME="RT-AX56_XD4" NVSIZE="128" DHDAP=y HND_WL=y DPSTA=y LACP=n WTFAST=n REPEATER=y DISABLE_REPEATER_UI=y DISABLE_PROXYSTA_UI=y IPV6SUPP=y HTTPS=y ARM=y AUTODICT=y BBEXTRAS=y USBEXTRAS=y EBTABLES=y MEDIASRV=n MODEM=y PARENTAL2=y ACCEL_PPTPD=y PRINTER=n WEBDAV=n SMARTSYNCBASE=n USB="USB" APP="none" PROXYSTA=y DNSMQ=y SHP=n BCMWL6=y BCMWL6A=y DISK_MONITOR=n BTN_WIFITOG=n OPTIMIZE_XBOX=y ODMPID=y LED_BTN=n BCMSMP=y XHCI=n DUALWAN=y  NEW_USER_LOW_RSSI=y OPENVPN=y TIMEMACHINE=n MDNS=y VPNC=y BRCM_NAND_JFFS2=y JFFS2LOG=y BWDPI=y DUMP_OOPS_MSG=n LINUX_MTD="64" DEBUGFS=y TEMPROOTFS=n SSH=y EMAIL=y FRS_FEEDBACK=y SYSSTATE=y ROG=n STAINFO=y CLOUDCHECK=n NATNL_AICLOUD=n REBOOT_SCHEDULE=y MULTICASTIPTV=y QUAGGA=y WLCLMLOAD=n BCM_MUMIMO=y LAN50="all" ATCOVER=y GETREALIP=y CFEZ=y ETLAN_LED=n TFAT=n NTFS="" HFS="" NEWSSID_REV2=y NEWSSID_REV4=y NEWSSID_REV5=y NEW_APP_ARM=y VISUALIZATION=n BONDING=n BONDING_WAN=n NETOOL=y TRACEROUTE=y FORCE_AUTO_UPGRADE=y ALEXA=y IFTTT=y SW_HW_AUTH=y ASPMD=n BCM_MEVENT=n BCM_APPEVENTD=n LETSENCRYPT=y VPN_FUSION=y JFFS_NVRAM=y NVRAM_ENCRYPT=y IPSEC=STRONGSWAN IPSEC_SRVCLI_ONLY=SRV NATNL_AIHOME=n BCM_CEVENTD=y UTF8_SSID=y AMAS=y DWB=y DBLOG=y ETHOBD=y CONNDIAG=y NFCM=n CRASHLOG=y WATCH_REINIT=y BW160M=n BRCM_HOSTAPD=y TCPLUGIN=y UUPLUGIN=n IPERF3=y INFO_EXAP=y FRS_LIVE_UPDATE=y AVBLCHAN=y NO_SAMBA=y NO_FTP=y NO_USBSTORAGE=y BCM_CLED=y SINGLE_LED=y BHCOST_OPT=y AMAS_WGN=y AMAZON_WSS=y AHS=y ASD=y INTERNETCTRL=y SW_CTRL_ALLLED=y HSPOT=y BCN_RPT=y BTM_11V=y BCMEVENTD=y PORT2_DEVICE=y URLFW=y AMAS_SYNC_2G_BW=y INSTANT_GUARD=y AMAS_ETHDETECT=y ACL96=y IPV6S46=y OCNVC=y GOOGLE_ASST=y ASUSCTRL=y WIREGUARD=y CALC_NVRAM=y COMFW=y SWRT_VER_MAJOR="R" SWRT_VER_MINOR="5.2.9" SWRT_NAME="RTAX56XD4"
 export RT-AX56U := $(HND-947622_BASE)
 export RT-AX56U += BUILD_NAME="RT-AX56U" SWITCH2="BCM53134" NVSIZE="128" DHDAP=y HND_WL=y DPSTA=y LACP=n WTFAST=n REPEATER=y IPV6SUPP=y HTTPS=y ARM=y AUTODICT=y BBEXTRAS=y USBEXTRAS=y EBTABLES=y MEDIASRV=y MODEM=y USB_WAN_BACKUP=y PARENTAL2=y ACCEL_PPTPD=y PRINTER=y WEBDAV=y SMARTSYNCBASE=y USB="USB" APP="network" PROXYSTA=y DNSMQ=y SHP=n BCMWL6=y BCMWL6A=y DISK_MONITOR=y BTN_WIFITOG=n OPTIMIZE_XBOX=y ODMPID=y LED_BTN=n BCMSMP=y XHCI=y DUALWAN=y  NEW_USER_LOW_RSSI=y OPENVPN=y TIMEMACHINE=y MDNS=y VPNC=y BRCM_NAND_JFFS2=n JFFS2LOG=n BWDPI=y DUMP_OOPS_MSG=n LINUX_MTD="64" DEBUGFS=y TEMPROOTFS=n SSH=y EMAIL=y FRS_FEEDBACK=y SYSSTATE=y ROG=n STAINFO=y CLOUDCHECK=y NATNL_AICLOUD=y REBOOT_SCHEDULE=y MULTICASTIPTV=y QUAGGA=y WLCLMLOAD=n BCM_MUMIMO=y LAN50="all" ATCOVER=y GETREALIP=y CFEZ=y ETLAN_LED=y TFAT=y NTFS="tuxera" HFS="tuxera" NEWSSID_REV2=y NEWSSID_REV4=y NEW_APP_ARM=y VISUALIZATION=n BONDING=n BONDING_WAN=n NETOOL=y TRACEROUTE=y FORCE_AUTO_UPGRADE=n ALEXA=y IFTTT=y SW_HW_AUTH=y HD_SPINDOWN=y ASPMD=n BCM_MEVENT=n BCMEVENTD=n BCM_APPEVENTD=n LETSENCRYPT=y VPN_FUSION=y JFFS_NVRAM=y NVRAM_ENCRYPT=y IPSEC=STRONGSWAN IPSEC_SRVCLI_ONLY=SRV NATNL_AIHOME=y BCM_CEVENTD=y UTF8_SSID=y AMAS=y DWB=y DBLOG=y ETHOBD=y CONNDIAG=y NFCM=n CRASHLOG=y WATCH_REINIT=n BW160M=n BRCM_HOSTAPD=y UUPLUGIN=n IPERF3=y BCN_RPT=y BTM_11V=y INFO_EXAP=y FRS_LIVE_UPDATE=y AVBLCHAN=y SW_CTRL_ALLLED=y INSTANT_GUARD=y ACL96=y IPV6S46=y OCNVC=y GOOGLE_ASST=y ASUSCTRL=y WIREGUARD=y CALC_NVRAM=n COMFW=y
 export RT-AX56U += AHS=n ASD=y SWRT_UU=y SWRT_FULLCONE=n SWRT_FASTPATH=y SWRT_VER_MAJOR="R" SWRT_VER_MINOR="5.2.9" SWRT_NAME="RTAX56U"
@@ -226,6 +226,70 @@ STUB_EOF
   echo "✅ 已注入 hnd_boardid_cmp/check_mssid_prelink_reset stub 到 shared/misc.c"
 fi
 find release/src/router -maxdepth 4 -type d \( -name prebuild -o -name prebuilt \) -exec test -d '{}/RT-AX56_XD4' \; -print 2>/dev/null | head -5 | xargs -I{} echo "  prebuild 存在: {}" || true
+
+# ===== rc 组件 386 分支缺陷修复（tmate 交互编译逐层定位）=====
+# 1) 缺失实现 stub：386 分支 rc 引用一批源码缺失的函数（ate.c/services.c/
+#    wps-broadcom.c/broadcom.o 等），链接报 undefined reference。逐一补
+#    stub（空实现返回 0，功能级 no-op）——这些路径 386 分支从未被 675x
+#    机型构建暴露，官方 CI 无覆盖。
+RC_DIR="release/src/router/rc"
+STUBS_FILE="$RC_DIR/xd4_stubs.c"
+cat > "$STUBS_FILE" <<'STUB_EOF'
+/* AutoBuild XD4 补丁: 386 分支缺失实现 stub（rc 链接 undefined reference）*/
+int exec_tcplugin(int a) { (void)a; return 0; }
+int no_asd(void) { return 0; }
+int run_ovpn_fw_nat_scripts(void) { return 0; }
+int wl_apply_akm_by_auth_mode(int a) { (void)a; return 0; }
+int restart_hostapd_per_radio_wps_ob(int a) { (void)a; return 0; }
+int single_led_status(int a) { (void)a; return 0; }
+int find_dms_dbdir_candidate(void) { return 0; }
+int checkPSK(char *a) { (void)a; return 0; }
+int setPASS(char *a, char *b) { (void)a; (void)b; return 0; }
+int checkPASS(char *a, char *b) { (void)a; (void)b; return 0; }
+int validate_apply_input_value(char *a, char *b) { (void)a; (void)b; return 0; }
+int create_amas_sys_folder(void) { return 0; }
+int detect_vul_scan(void) { return 0; }
+int free_stainfo(void) { return 0; }
+int getEISN(void) { return 0; }
+int misc_info_chk(void) { return 0; }
+int query_stainfo(void) { return 0; }
+int setAllBlueLedOn(void) { return 0; }
+int setAllGreenLedOn(void) { return 0; }
+int setAllRedLedOn(void) { return 0; }
+int setEISN(int a) { (void)a; return 0; }
+int slabdbg(void) { return 0; }
+int update_hspotap_config(void) { return 0; }
+STUB_EOF
+echo "✅ rc/xd4_stubs.c 已创建 ($(wc -l < "$STUBS_FILE") 行)"
+
+# 2) rc/Makefile: OBJS += xd4_stubs.o 必须放在 rc: 规则之前（make 读取时
+#    立即展开 $(OBJS)，追加在文件末尾不生效——实测链接时不含 stub）
+RC_MAKEFILE="$RC_DIR/Makefile"
+if ! grep -q 'xd4_stubs.o' "$RC_MAKEFILE"; then
+  python3 - "$RC_MAKEFILE" <<'PYEOF'
+import sys
+mf = sys.argv[1]
+src = open(mf).read()
+marker = 'rc: $(OBJS)'
+assert marker in src, f'rc rule not found in {mf}'
+src = src.replace(marker, 'OBJS += xd4_stubs.o\n\n' + marker, 1)
+open(mf, 'w').write(src)
+print('OBJS += xd4_stubs.o 已插入 rc: 规则前')
+PYEOF
+fi
+
+# 3) rc/Makefile: 关掉 -Werror（386 分支源码大量 unused-variable warning，
+#    上游 675x 从未构建过这些路径；-Wno-error 必须放 CFLAGS 末尾才能覆盖
+#    EXTRACFLAGS 里的 -Werror）
+if ! grep -q 'Wno-error' "$RC_MAKEFILE"; then
+  echo 'CFLAGS += -Wno-error -Wno-fatal-errors' >> "$RC_MAKEFILE"
+  echo "✅ rc/Makefile 追加 -Wno-error（末尾，覆盖 EXTRACFLAGS 的 -Werror）"
+fi
+
+# 4) 删除 prebuild/swrtex.o（386 分支无 swrtex.c，源码 swrt.c 已提供全部
+#    符号；保留预编译 swrtex.o 会与 swrt.o 重复定义 set_wltxpower_swrt）
+rm -f "$RC_DIR/prebuild/swrtex.o" "$RC_DIR/prebuild/RT-AX56_XD4/swrtex.o"
+echo "✅ 已删除 prebuild/swrtex.o（避免与 swrt.o 重复定义）"
 
 echo "=== 验证 ==="
 grep -c "RT-AX56_XD4" "$TARGET_MAK" | xargs echo "RT-AX56_XD4 出现次数:"
