@@ -355,11 +355,16 @@ echo "✅ httpd/Makefile 已引用 xd4_stubs.o"
 # wl 组件的 acsdv2 prebuilt 只有 RT-AX56U/RT-AX55 目录，XD4 构建时
 # cp prebuilt/RT-AX56_XD4/acsd2 失败。与 rc/prebuild 同款：同平台
 # BCM6755 产物兼容，复制 RT-AX56U 目录为 RT-AX56_XD4。
-ACSDV2_PB=$(find release/src-rt-5.02axhnd.675x/bcmdrivers -type d -path '*/components/apps/acsdv2/prebuilt' 2>/dev/null | head -1)
-if [ -n "$ACSDV2_PB" ] && [ -d "$ACSDV2_PB/RT-AX56U" ] && [ ! -e "$ACSDV2_PB/RT-AX56_XD4" ]; then
-  cp -ar "$ACSDV2_PB/RT-AX56U" "$ACSDV2_PB/RT-AX56_XD4"
-  echo "✅ acsdv2 prebuilt/RT-AX56_XD4 已补齐 (来自 RT-AX56U)"
-fi
+# TUF-AX3000 与 XD4 同平台（5.02axhnd.675x）——用它的 acsd2 预编译产物；
+# RT-AX56U 目录在 675x 的 acsdv2 prebuilt 中不存在（实测）
+for SRC_ACSD2 in $(find release/src-rt-5.02axhnd.675x/bcmdrivers -path '*/acsdv2/prebuilt/TUF-AX3000/acsd2' 2>/dev/null); do
+  ACSDV2_PB=$(dirname "$(dirname "$SRC_ACSD2")")
+  if [ ! -e "$ACSDV2_PB/RT-AX56_XD4/acsd2" ]; then
+    mkdir -p "$ACSDV2_PB/RT-AX56_XD4"
+    cp -f "$SRC_ACSD2" "$ACSDV2_PB/RT-AX56_XD4/acsd2"
+    echo "✅ acsdv2 prebuilt/RT-AX56_XD4/acsd2 已补齐 (来自 TUF-AX3000, 同 675x)"
+  fi
+done
 
 echo "=== 验证 ==="
 grep -c "RT-AX56_XD4" "$TARGET_MAK" | xargs echo "RT-AX56_XD4 出现次数:"
