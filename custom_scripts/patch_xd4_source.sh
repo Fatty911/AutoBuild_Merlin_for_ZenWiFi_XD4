@@ -288,8 +288,59 @@ fi
 
 # 4) 删除 prebuild/swrtex.o（386 分支无 swrtex.c，源码 swrt.c 已提供全部
 #    符号；保留预编译 swrtex.o 会与 swrt.o 重复定义 set_wltxpower_swrt）
-rm -f "$RC_DIR/prebuild/swrtex.o" "$RC_DIR/prebuild/RT-AX56_XD4/swrtex.o"
-echo "✅ 已删除 prebuild/swrtex.o（避免与 swrt.o 重复定义）"
+# 386 分支无 swrtex.c，Makefile 的 $(if $(wildcard swrtex.c),swrtex.o,prebuild/swrtex.o)
+# 会引用 prebuild/swrtex.o——仅删文件会报 "No rule to make target"，必须同时移除引用
+# （swrt.o 已提供全部符号，swrtex.o 是 24353 分支遗留）
+sed -i '/swrtex\.o/d' "$RC_MAKEFILE"
+echo "✅ rc/Makefile 已移除 swrtex.o 引用（swrt.o 提供全部符号）"
+
+# 5) libconn_diag.so 构建规则：CONNDIAG=y 时 rc 依赖它但 386 分支 Makefile
+#    无生成规则（上游缺陷，RT-AX56U 同配置从未构建过）
+if ! grep -q '^libconn_diag.so:' "$RC_MAKEFILE"; then
+  sed -i '/^rc: \$(OBJS)/i \
+libconn_diag.so: conn_diag.o\
+\t@echo " [rc] CC libconn_diag.so"\
+\t@$(CC) -shared -o $@ conn_diag.o $(LDFLAGS2) $(CFLAGS)' "$RC_MAKEFILE"
+  echo "✅ libconn_diag.so 构建规则已添加（CONNDIAG=y 需要）"
+else
+  echo "ℹ️ libconn_diag.so 规则已存在"
+fi
+echo "✅ libconn_diag.so 构建规则已添加（CONNDIAG=y 需要）"
+
+# ===== httpd 组件 386 分支缺陷修复（tmate 交互编译定位）=====
+# httpd 链接引用一批 386 分支缺失实现（web.c/web_hook.o 的 token/认证相关），
+# 逐一补 stub（与 rc 同款处理）
+HTTPD_DIR="release/src/router/httpd"
+HTTPD_STUBS="$HTTPD_DIR/xd4_stubs.c"
+cat > "$HTTPD_STUBS" <<'STUB_EOF'
+/* AutoBuild XD4 补丁: 386 分支缺失实现 stub（httpd 链接 undefined reference）*/
+int do_endpoint_request_token_cgi(void) { return 0; }
+int add_try(void) { return 0; }
+int gen_asus_token_cookie(void) { return 0; }
+int get_defpass(void) { return 0; }
+int invalid_nvram_get_name(void) { return 0; }
+int reset_accpw(void) { return 0; }
+int validate_apply_input_value(char *a, char *b) { (void)a; (void)b; return 0; }
+int app_auth(void) { return 0; }
+int do_asusrouter_request_token_cgi(void) { return 0; }
+int do_asusrouter_request_access_token_cgi(void) { return 0; }
+STUB_EOF
+echo "✅ httpd/xd4_stubs.c 已创建 ($(wc -l < "$HTTPD_STUBS") 行)"
+
+HTTPD_MAKEFILE="$HTTPD_DIR/Makefile"
+if ! grep -q 'xd4_stubs.o' "$HTTPD_MAKEFILE"; then
+  python3 - "$HTTPD_MAKEFILE" <<'PYEOF'
+import sys
+mf = sys.argv[1]
+src = open(mf).read()
+marker = 'OBJS = httpd.o cgi.o ej.o'
+assert marker in src, f'OBJS marker not found in {mf}'
+src = src.replace(marker, marker + '\nOBJS += xd4_stubs.o', 1)
+open(mf, 'w').write(src)
+print('httpd OBJS += xd4_stubs.o 已添加')
+PYEOF
+fi
+echo "✅ httpd/Makefile 已引用 xd4_stubs.o"
 
 echo "=== 验证 ==="
 grep -c "RT-AX56_XD4" "$TARGET_MAK" | xargs echo "RT-AX56_XD4 出现次数:"
