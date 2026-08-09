@@ -429,6 +429,7 @@ fi
 # 且 bcmcrypto/aes.c 源码不存在（vpath %.c 也无源）。修复：显式规则从
 # prebuilt.hnd_ax 复制（相对路径，不依赖 SRCBASE）。
 LBC_MF="release/src/router/libbcmcrypto/Makefile"
+LBC_PB="release/src/router/libbcmcrypto/prebuilt.hnd_ax"
 if [ -f "$LBC_MF" ] && ! grep -q '^aes.o:' "$LBC_MF"; then
   cat >> "$LBC_MF" <<'LBC_EOF'
 
@@ -438,8 +439,15 @@ aes.o: prebuilt.hnd_ax/aes.o
 LBC_EOF
   echo "✅ libbcmcrypto aes.o 显式规则已添加（复制自 prebuilt.hnd_ax）"
 fi
-# 双保险：prebuilt.hnd_ax/aes.o 缺失时从其它 prebuilt 复制（同 ARM）
-LBC_PB="release/src/router/libbcmcrypto/prebuilt.hnd_ax"
+# 双保险：prebuilt.hnd_ax 空目录时从 git 恢复（runner 环境实测整个目录空——
+# clone 偶发未 checkout .o 文件；git 仍可用（.git 在 patch 阶段未删））。
+# WSL 验证：git checkout HEAD -- <path> 可恢复全部 13 个 .o。
+if [ -d "$LBC_PB" ] && [ -z "$(ls -A "$LBC_PB" 2>/dev/null)" ] && [ -d "$1/.git" ]; then
+  (cd "$1" && git checkout HEAD -- release/src/router/libbcmcrypto/prebuilt.hnd_ax/ 2>/dev/null) \
+    && echo "✅ libbcmcrypto prebuilt.hnd_ax 已从 git 恢复 ($(ls "$LBC_PB" 2>/dev/null | wc -l) 文件)" \
+    || echo "⚠️ libbcmcrypto prebuilt.hnd_ax git 恢复失败"
+fi
+# 最终保险：aes.o 仍缺失时从其它 prebuilt 复制（同 ARM）
 if [ -d "$LBC_PB" ] && [ ! -e "$LBC_PB/aes.o" ]; then
   SRC_AES=$(find release/src/router/libbcmcrypto -name aes.o -path '*/prebuilt.*/*' 2>/dev/null | head -1)
   if [ -n "$SRC_AES" ]; then
