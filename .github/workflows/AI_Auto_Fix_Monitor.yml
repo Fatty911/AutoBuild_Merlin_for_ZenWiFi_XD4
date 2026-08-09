@@ -77,12 +77,14 @@ jobs:
           echo "=== 错误日志头部 ==="
           head -20 last_error.log
 
-      - name: Classify failure
+      - name: Classify failure and record history
         id: classify
         env:
-          ERROR_LOG: last_error.log
+          RUN_ID: ${{ env.WORKFLOW_RUN_ID }}
         run: |
-          python3 custom_scripts/classify_build_failure.py
+          # 分类 + 组件/预案查询 + history 沉淀（transient/upstream 不触发 AI）
+          python3 custom_scripts/playbook_runner.py --mode monitor --log last_error.log --run-id "${RUN_ID}" \
+            || echo "::warning::分类/记录失败（不影响后续判断）"
 
       - name: Report skip reason
         if: steps.classify.outputs.should_fix == 'false'
@@ -162,3 +164,22 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE"
           bash custom_scripts/run_track3.sh
+
+      - name: Record AI resolution result
+        if: always() && steps.classify.outputs.should_fix == 'true'
+        env:
+          RUN_ID: ${{ env.WORKFLOW_RUN_ID }}
+          REASON: ${{ steps.classify.outputs.reason }}
+        run: |
+          if [ "${{ steps.opencode_fix.outcome }}" = "success" ]; then
+            RESOLVED=ai
+          else
+            RESOLVED=ai_failed
+          fi
+          python3 custom_scripts/playbook_runner.py --mode record \
+            --signature "${{ steps.classify.outputs.classification }}" \
+            --category "${{ steps.classify.outputs.category }}" \
+            --component "${{ steps.classify.outputs.component }}" \
+            --reason "$REASON" \
+            --source "monitor:${RUN_ID}" --resolved-by "${RESOLVED}" --run-id "${RUN_ID}" \
+            || echo "::warning::AI 结果记录失败"

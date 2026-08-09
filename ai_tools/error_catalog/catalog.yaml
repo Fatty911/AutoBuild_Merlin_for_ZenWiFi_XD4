@@ -1,0 +1,125 @@
+# Merlin XD4 构建错误分类目录（Error Catalog）
+#
+# 分类决策由 custom_scripts/classify_build_failure.py 完成（transient/upstream
+# 不触发 AI），本目录补充组件归属、预案步骤与历史沉淀。
+# 本地调试（WSL2/容器模拟）与线上 AI_Auto_Fix_Monitor 共用。
+#
+# 组件维度：
+#   upstream:merlin   — SWRT-dev/asuswrt-bcm 386 分支源码
+#   upstream:kernel   — 内核/DTS
+#   build:process     — 构建流程/配置/依赖环境
+#   build:artifact    — prep-env 产物/构建缓存/固件
+#   infra:network     — 网络/下载/资源
+#   ours:workflow     — 本仓库 workflow/custom_scripts
+#
+# 预案设计铁律（防上游变更回归）：
+#   1. 预案幂等：目标已满足时静默跳过，不得报错。
+#   2. 涉及路径先验证存在性；上游改名/删除后不得按旧路径继续，标记
+#      upstream_changed 交由决策。
+#   3. patch 类先反向检测（patch -R --dry-run），已应用则跳过。
+#   4. 结果记录到 history.jsonl（随仓库提交，跨 run 沉淀）。
+
+categories:
+  - id: no_logs
+    name: 无有效日志
+    components: [build:process]
+    classification: no_logs
+    should_fix: false
+    playbook:
+      id: pb_no_logs
+      name: 拒绝盲修
+      steps: |
+        无真实错误日志 → 直接失败退出，不触发 AI（与 AGENTS.md 盲修红线一致）。
+      persistent_fix: []
+    ai_fallback: false
+
+  - id: transient
+    name: 临时性网络/环境问题
+    components: [infra:network]
+    classification: transient
+    should_fix: false
+    playbook:
+      id: pb_transient
+      name: 重跑即可
+      steps: |
+        网络抖动/限流/runner 瞬时故障 → 不改代码，人工或定时重跑。
+      persistent_fix: []
+    ai_fallback: false
+
+  - id: upstream
+    name: 上游仓库问题
+    components: [upstream:merlin]
+    classification: upstream
+    should_fix: false
+    playbook:
+      id: pb_upstream
+      name: 等上游修复
+      steps: |
+        上游仓库/分支不可达或不存在 → 等上游修复，不触发 AI 乱修。
+      persistent_fix: []
+    ai_fallback: false
+
+  - id: dependency
+    name: 依赖/环境配置问题
+    components: [build:process]
+    classification: dependency
+    should_fix: true
+    playbook:
+      id: pb_dependency
+      name: 环境修复
+      steps: |
+        1. 缺包/缺工具：补齐 apt 依赖（Install dependencies 列表）。
+        2. 磁盘满：调大 maximize-build-space root-reserve / 清理缓存。
+        3. 修复构建 workflow 的环境配置后重跑。
+      persistent_fix: []
+    ai_fallback: true
+
+  - id: build_error
+    name: 编译错误
+    components: [upstream:merlin, upstream:kernel]
+    classification: build_error
+    should_fix: true
+    playbook:
+      id: pb_build_error
+      name: 编译错误处理
+      steps: |
+        1. 确认失败组件（extract_last_error 已定位 Entering directory 块）。
+        2. patch 类错误：先 patch -R --dry-run 检测是否已应用；目标文件
+           不存在 = 上游已改名/修复 → 跳过旧补丁，适配新路径。
+        3. 上游回归检测：git -C asuswrt-bcm log --oneline -5 -- <组件路径>，
+           上游最近改动 → 按新代码适配。
+        4. 已知组件坑（stlport/skipdbv2/ndisc6/rc/httpd 等，见
+           skill wsl2-runner-simulation references/merlin-asuswrt-build-pitfalls.md）
+           按坑预案处理；新问题转 AI。
+      persistent_fix: []
+    ai_fallback: true
+
+  - id: gate
+    name: 质量门未通过
+    components: [build:process, ours:workflow]
+    classification: gate
+    should_fix: true
+    playbook:
+      id: pb_gate
+      name: 质量门检查
+      steps: |
+        1. 确认固件文件存在且匹配 RT-AX56_XD4_*.trx、≥10MB、
+           softcenter 已集成（validate_build_output.py --gate）。
+        2. 固件缺失 = 编译未产出 → 回到 build_error 处理。
+      persistent_fix: []
+    ai_fallback: true
+
+  - id: prep_env
+    name: 环境恢复/打包问题
+    components: [build:artifact]
+    classification: prep_env
+    should_fix: true
+    playbook:
+      id: pb_prep_env
+      name: 环境完整性检查
+      steps: |
+        1. prep-env.tgz 下载失败 → 检查 artifact 是否存在/过期，重新触发 Prepare。
+        2. 解压后 softcenter 缺失 → 打包不完整，重新 Prepare。
+        3. 恢复不完整（toolchains/asuswrt-bcm 缺失）→ 重新 Prepare。
+      persistent_fix: []
+    ai_fallback: true
