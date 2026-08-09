@@ -51,8 +51,8 @@ env:
 jobs:
   build:
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 420
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
     permissions:
       contents: write
       actions: write
@@ -69,6 +69,7 @@ jobs:
           root-reserve-mb: 24576
           temp-reserve-mb: 2048
           swap-size-mb: 2048
+          build-mount-path: /workdir
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
@@ -79,6 +80,18 @@ jobs:
         uses: actions/checkout@main
         with:
           fetch-depth: 1
+
+      - name: Relocate workspace to /workdir
+        run: |
+          # 官方 runner 大卷挂载在 /workdir（easimon build-mount-path），
+          # 源码/工具链/编译产物都在 workspace，必须放到大卷；根分区仅 24G
+          sudo mkdir -p /workdir/ws
+          sudo rsync -a --remove-source-files "$GITHUB_WORKSPACE/" /workdir/ws/ 2>/dev/null || \
+            sudo cp -a "$GITHUB_WORKSPACE/." /workdir/ws/
+          sudo rm -rf "$GITHUB_WORKSPACE"
+          sudo ln -s /workdir/ws "$GITHUB_WORKSPACE"
+          sudo chown -R "$USER" /workdir/ws
+          df -hT /workdir "$GITHUB_WORKSPACE"
 
       # 定时触发时先查上游 HEAD，无变化直接跳过（避免空跑 2 小时）
       - name: Check upstream change (scheduled runs only)
