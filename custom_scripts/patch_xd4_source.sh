@@ -422,6 +422,21 @@ if [ -d "$ASD_PB/RT-AX55" ] && [ ! -e "$ASD_PB/RT-AX56_XD4" ]; then
   echo "✅ asd prebuild/RT-AX56_XD4 已补齐 (来自 RT-AX55): $(ls "$ASD_PB/RT-AX56_XD4" 2>/dev/null | tr '\n' ' ')"
 fi
 
+# ===== libbcmcrypto aes.o 显式规则保险（runner 环境实测 No rule）=====
+# runner 构建 libbcmcrypto.so 时 "No rule to make target 'aes.o'"（WSL 正常）。
+# libbcmcrypto 无 .c 源文件，aes.c 在 bcmcrypto 目录（Makefile 9 行 vpath %.c）。
+# 加显式规则保证 aes.o 可构建（源码编译，不依赖 prebuilt 布局差异）。
+LBC_MF="release/src/router/libbcmcrypto/Makefile"
+if [ -f "$LBC_MF" ] && ! grep -q '^aes.o:' "$LBC_MF"; then
+  cat >> "$LBC_MF" <<'LBC_EOF'
+
+# AutoBuild XD4 补丁: aes.o 显式规则（runner 环境 No rule 保险）
+aes.o: $(SRCBASE)/bcmcrypto/aes.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+LBC_EOF
+  echo "✅ libbcmcrypto aes.o 显式规则已添加（源码编译自 bcmcrypto/aes.c）"
+fi
+
 echo "=== 验证 ==="
 grep -c "RT-AX56_XD4" "$TARGET_MAK" | xargs echo "RT-AX56_XD4 出现次数:"
 ls -d "$RSDIR/router-sysdep.rt-ax56_xd4" >/dev/null && echo "router-sysdep.rt-ax56_xd4: OK"
