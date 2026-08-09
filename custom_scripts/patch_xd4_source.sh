@@ -424,17 +424,28 @@ fi
 
 # ===== libbcmcrypto aes.o 显式规则保险（runner 环境实测 No rule）=====
 # runner 构建 libbcmcrypto.so 时 "No rule to make target 'aes.o'"（WSL 正常）。
-# libbcmcrypto 无 .c 源文件，aes.c 在 bcmcrypto 目录（Makefile 9 行 vpath %.c）。
-# 加显式规则保证 aes.o 可构建（源码编译，不依赖 prebuilt 布局差异）。
+# 根因：vpath %.o $(SRCBASE)/router/libbcmcrypto/prebuilt.hnd_ax 依赖 SRCBASE
+# 解析（runner 的 SRCBASE 指向 bcmdrivers 树，链接/布局差异致 vpath 失效）；
+# 且 bcmcrypto/aes.c 源码不存在（vpath %.c 也无源）。修复：显式规则从
+# prebuilt.hnd_ax 复制（相对路径，不依赖 SRCBASE）。
 LBC_MF="release/src/router/libbcmcrypto/Makefile"
 if [ -f "$LBC_MF" ] && ! grep -q '^aes.o:' "$LBC_MF"; then
   cat >> "$LBC_MF" <<'LBC_EOF'
 
-# AutoBuild XD4 补丁: aes.o 显式规则（runner 环境 No rule 保险）
-aes.o: $(SRCBASE)/bcmcrypto/aes.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+# AutoBuild XD4 补丁: aes.o 显式规则（从 prebuilt.hnd_ax 复制，幂等）
+aes.o: prebuilt.hnd_ax/aes.o
+	cp -f $< $@
 LBC_EOF
-  echo "✅ libbcmcrypto aes.o 显式规则已添加（源码编译自 bcmcrypto/aes.c）"
+  echo "✅ libbcmcrypto aes.o 显式规则已添加（复制自 prebuilt.hnd_ax）"
+fi
+# 双保险：prebuilt.hnd_ax/aes.o 缺失时从其它 prebuilt 复制（同 ARM）
+LBC_PB="release/src/router/libbcmcrypto/prebuilt.hnd_ax"
+if [ -d "$LBC_PB" ] && [ ! -e "$LBC_PB/aes.o" ]; then
+  SRC_AES=$(find release/src/router/libbcmcrypto -name aes.o -path '*/prebuilt.*/*' 2>/dev/null | head -1)
+  if [ -n "$SRC_AES" ]; then
+    cp -f "$SRC_AES" "$LBC_PB/aes.o"
+    echo "✅ libbcmcrypto prebuilt.hnd_ax/aes.o 已补齐 (来自 $SRC_AES)"
+  fi
 fi
 
 echo "=== 验证 ==="
