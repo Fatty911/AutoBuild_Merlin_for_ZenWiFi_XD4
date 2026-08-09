@@ -410,7 +410,20 @@ jobs:
           echo "=== 构建模型: $MODEL (SDK: $SDK_DIR) ==="
           echo "=== 磁盘剩余: $(df -h / | tail -1 | awk '{print $4}') ==="
           set -o pipefail
-          make "$MODEL" > build.log 2>&1 || {
+          # 诊断：libbcmcrypto prebuilt 状态（runner 环境 aes.o 缺失排查）
+          # 输出到 build.log（覆盖），make 追加——error-log artifact 可含诊断
+          {
+            LBC_DIR="$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/libbcmcrypto"
+            echo "=== DIAG libbcmcrypto ==="
+            ls -la "$LBC_DIR/prebuilt.hnd_ax/" 2>&1 | head -20 || true
+            echo "=== DIAG vpath 行 ==="
+            grep -n "vpath" "$LBC_DIR/Makefile" 2>&1 | head -8 || true
+            echo "=== DIAG aes.o 相关 ==="
+            ls -la "$LBC_DIR/aes.o" 2>&1 || echo "aes.o 不存在(当前目录)"
+            ls -la "$LBC_DIR/prebuilt.hnd_ax/aes.o" 2>&1 || echo "prebuilt.hnd_ax/aes.o 不存在"
+            echo "=== DIAG 结束 ==="
+          } > build.log 2>&1 || true
+          make "$MODEL" >> build.log 2>&1 || {
             echo "首次构建失败，收集错误信息..."
             # 优先收集 bluez 的 config.log（BT 链 conftest 链接失败的关键诊断）
             BLUEZ_CL="$GITHUB_WORKSPACE/asuswrt-bcm/release/src/router/bluez-5.56/config.log"
