@@ -371,6 +371,57 @@ for ACSDV2_PB in $(find release/src-rt-5.02axhnd.675x/bcmdrivers -type d -path '
   echo "✅ acsdv2 prebuilt/RT-AX56_XD4 已补齐 (TUF-AX3000 产物, 同 675x): $(ls "$ACSDV2_XD4" | tr '\n' ' ')"
 done
 
+# ===== stlport 组件修复（WSL 模拟编译定位，runner 同样会遇到）=====
+# 386 分支 stlport Makefile 的 patch 命令无 -N：源码已解压/已应用过 patch
+# 时（增量重编/缓存恢复后）patch 检测到 Reversed 会交互询问（tty 挂起）
+# 或报错退出（非 tty 的 runner 直接 Error 2）。加 -N 忽略已应用的 hunk。
+# 实际构建优先用 TOP_PLATFORM 机型专属目录（router-sysdep.rt-ax56_xd4/），
+# 其次通用目录（router-sysdep/）——两个都修
+# 构建目录 router-sysdep/* 每次 make 从 bcmdrivers 源同步复制（02:33 实测覆盖），
+# 必须改源：bcmdrivers/broadcom/net/wl/bcm947622/main/components/router-sysdep/stlport
+for STLPORT_MF in \
+  "release/src-rt-5.02axhnd.675x/bcmdrivers/broadcom/net/wl/bcm947622/main/components/router-sysdep/stlport/Makefile" \
+  "release/src-rt-5.02axhnd.675x/bcmdrivers/broadcom/net/wl/impl69/main/components/router-sysdep/stlport/Makefile"; do
+  if [ -f "$STLPORT_MF" ]; then
+    # patch 加 -N 忽略已应用 hunk + 失败忽略 + configure < /dev/null
+    # （sed 的 | 分隔符与 || 冲突，用 python3 可靠替换）
+    python3 - "$STLPORT_MF" <<'PYEOF'
+import sys
+mf = sys.argv[1]
+src = open(mf).read()
+p_old = 'patch -p1 -b -d$(LIB-SRC) < bcm_patches/$(LIB-SRC).patch'
+p_new = 'patch -N -p1 -b -d$(LIB-SRC) < bcm_patches/$(LIB-SRC).patch || true'
+c_old = 'cd $(LIB-SRC); ./configure --use-compiler-family=gcc --target=$(TOOLCHAIN_PREFIX) --prefix=$(PREFIX) --with-extra-cxxflags="$(CXXFLAGS)" --with-extra-cflags="$(CFLAGS)")'
+c_old2 = 'cd $(LIB-SRC); ./configure --use-compiler-family=gcc --target=$(TOOLCHAIN_PREFIX) --prefix=$(PREFIX) --with-extra-cxxflags="$(CXXFLAGS)" --with-extra-cflags="$(CFLAGS)" < /dev/null)'
+c_old3 = 'cd $(LIB-SRC); ./configure --use-compiler-family=gcc --target=$(TOOLCHAIN_PREFIX) --prefix=$(PREFIX) --with-extra-cxxflags="$(CXXFLAGS)" --with-extra-cflags="$(CFLAGS)"< /dev/null)'
+# STLport configure 带 extra flags 时编译器测试失败（WSL 实测，runner 同源必遇）；
+# 简化为无 flags + < /dev/null + || true（flags 由 make 环境变量提供，configure
+# 只是生成 Makefile 结构）
+c_new = 'PATH=$(TOOLCHAIN)/bin ; cd $(LIB-SRC); ./configure --use-compiler-family=gcc --target=$(TOOLCHAIN_PREFIX) --prefix=$(PREFIX) < /dev/null || true)'
+if p_old in src:
+    src = src.replace(p_old, p_new)
+    print('stlport: patch -N + || true 已加')
+for c_old in (c_old, c_old2, c_old3):
+    if c_old in src:
+        src = src.replace(c_old, c_new)
+        print('stlport: configure 简化已加')
+open(mf, 'w').write(src)
+PYEOF
+  fi
+done
+
+# ===== asd 组件 prebuild 补齐（WSL 模拟编译定位）=====
+# asd/Makefile 54-55 行 cp prebuild/$(BUILD_NAME)/asd 与 libasd.so——
+# 386 分支 prebuild 只有 RT-AX55 目录，XD4 构建时 cp 失败（- 前缀忽略）
+# → install 阶段 asd/libasd.so 缺失报错。同 rc/prebuild 模式：复制
+# RT-AX55 目录为 RT-AX56_XD4（同平台 BCM6755 产物兼容）。
+ASD_PB="release/src/router/asd/prebuild"
+if [ -d "$ASD_PB/RT-AX55" ] && [ ! -e "$ASD_PB/RT-AX56_XD4" ]; then
+  mkdir -p "$ASD_PB/RT-AX56_XD4"
+  cp -f "$ASD_PB/RT-AX55/"* "$ASD_PB/RT-AX56_XD4/" 2>/dev/null || true
+  echo "✅ asd prebuild/RT-AX56_XD4 已补齐 (来自 RT-AX55): $(ls "$ASD_PB/RT-AX56_XD4" 2>/dev/null | tr '\n' ' ')"
+fi
+
 echo "=== 验证 ==="
 grep -c "RT-AX56_XD4" "$TARGET_MAK" | xargs echo "RT-AX56_XD4 出现次数:"
 ls -d "$RSDIR/router-sysdep.rt-ax56_xd4" >/dev/null && echo "router-sysdep.rt-ax56_xd4: OK"
