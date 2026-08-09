@@ -439,13 +439,17 @@ aes.o: prebuilt.hnd_ax/aes.o
 LBC_EOF
   echo "✅ libbcmcrypto aes.o 显式规则已添加（复制自 prebuilt.hnd_ax）"
 fi
-# 双保险：prebuilt.hnd_ax 空目录时从 git 恢复（runner 环境实测整个目录空——
-# clone 偶发未 checkout .o 文件；git 仍可用（.git 在 patch 阶段未删））。
+# 双保险：prebuilt.hnd_ax 从 git 恢复（runner 环境实测整个目录空——clone
+# 偶发未 checkout .o 文件；无条件执行（不依赖空判断，避免条件误判）。
 # WSL 验证：git checkout HEAD -- <path> 可恢复全部 13 个 .o。
-if [ -d "$LBC_PB" ] && [ -z "$(ls -A "$LBC_PB" 2>/dev/null)" ] && [ -d "$1/.git" ]; then
-  (cd "$1" && git checkout HEAD -- release/src/router/libbcmcrypto/prebuilt.hnd_ax/ 2>/dev/null) \
-    && echo "✅ libbcmcrypto prebuilt.hnd_ax 已从 git 恢复 ($(ls "$LBC_PB" 2>/dev/null | wc -l) 文件)" \
-    || echo "⚠️ libbcmcrypto prebuilt.hnd_ax git 恢复失败"
+if [ -d "$1/.git" ]; then
+  if (cd "$1" && git checkout HEAD -- release/src/router/libbcmcrypto/prebuilt.hnd_ax/ 2>&1 | tail -3); then
+    echo "✅ libbcmcrypto prebuilt.hnd_ax git 恢复完成 ($(ls "$LBC_PB" 2>/dev/null | wc -l) 文件)"
+  else
+    echo "⚠️ libbcmcrypto prebuilt.hnd_ax git 恢复失败（详见上方输出）"
+  fi
+else
+  echo "⚠️ $1/.git 不存在，跳过 git 恢复"
 fi
 # 最终保险：aes.o 仍缺失时从其它 prebuilt 复制（同 ARM）
 if [ -d "$LBC_PB" ] && [ ! -e "$LBC_PB/aes.o" ]; then
