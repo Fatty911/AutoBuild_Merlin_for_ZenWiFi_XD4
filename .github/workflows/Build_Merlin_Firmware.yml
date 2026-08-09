@@ -51,13 +51,14 @@ env:
 jobs:
   build:
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 420
     permissions:
       contents: write
       actions: write
     steps:
       - name: Maximize build space
+        if: runner.environment == 'github-hosted'
         uses: easimon/maximize-build-space@master
         with:
           # root-reserve 24G：runner 日志/_diag、/tmp、$HOME/.cache 都在根分区，
