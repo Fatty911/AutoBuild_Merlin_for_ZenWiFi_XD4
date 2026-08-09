@@ -19,7 +19,10 @@ TRANSIENT_PATTERNS = [
     r"Failed to connect|Could not connect|Connection (reset|timed out|refused)",
     r"fatal: unable to access|early EOF|index-pack failed|RPC failed|fetch-pack",
     r"Operation timed out|Timeout was reached|ETIMEDOUT|Connection timed out",
-    r"429|503|502|Too Many Requests|Service Unavailable|rate limit",
+    # 注意：不能匹配裸 429/503/502——编译日志行号/数字会误命中
+    # （如 "dnsmasq.init:502: parse error" 会被误判 transient 而跳过 AI）
+    r"\bHTTP[^\n]{0,20}\b(429|503|502)\b|\b(429|503|502)\b[^\n]{0,30}(Too Many Requests|Service Unavailable|rate limit)",
+    r"Too Many Requests|Service Unavailable|rate limit",
     # 注意: 不能匹配裸 "runner"（错误日志路径里全是 /home/runner/...）
     r"The runner has exited|runner lost|self-hosted runner|Runner was (reaped|terminated)|infrastructure error",
     r"Could not resolve host|Temporary failure in name resolution",
