@@ -1,0 +1,25 @@
+name: CI Workflow Steps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Setup Python
+        uses: actions/setup-python@main
+        with:
+          python-version: '3.12'
+
+      - name: Run workflow step tests
+        run: |
+          pip install pytest
+          python -m pytest tests/ -v --tb=short
