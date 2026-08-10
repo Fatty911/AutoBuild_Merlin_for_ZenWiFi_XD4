@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Merlin 编译产物打包/恢复（增量构建专用）。
+
+只打包对象/库产物（.o/.a/.so/.lo/.ko），排除源码与上游预编译目录——
+之前 Save phase1 保存整个 release（源码+产物 ~10GB）导致 GitHub cache
+超限静默失败，增量恢复从未生效（每次全量编译 ~50 分钟）。
+
+用法：
+  pack_build_artifacts.py pack <release_dir> <out.tar.zst>
+  pack_build_artifacts.py unpack <release_dir> <in.tar.zst>
+
+压缩器优先级：zstd → pigz → gzip（全部缺失时退化为不压缩 tar）。
+"""
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+EXTENSIONS = (".o", ".a", ".so", ".lo", ".ko")
+# 只排除明确目录：prebuild/prebuilt 是上游预编译（源码树已有，无需打包）；
+# .git/dl/image/targets 非产物。注意不能排除所有点目录——libtool 构建的
+# .libs/ 子目录存放库产物（.o/.a/.so），漏打包会导致增量恢复链接失败
+EXCLUDE_DIRS = {"prebuild", "prebuilt", ".git", "dl", "image", "targets"}
+
+
+def pick_compressor():
+    for prog, args in (("zstd", None), ("pigz", None), ("gzip", None)):
+        if shutil.which(prog):
+            return prog
+    return None
+
+
+def collect_files(release_dir):
+    files = []
+    for root, dirs, fnames in os.walk(release_dir):
+        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+        for fn in fnames:
+            if fn.endswith(EXTENSIONS):
+                files.append(Path(root) / fn)
+    return files
+
+
+def cmd_pack(args):
+    release_dir = Path(args.release_dir)
+    if not release_dir.is_dir():
+        print(f"::error::release 目录不存在: {release_dir}")
+        return 1
+    files = collect_files(release_dir)
+    if not files:
+        print("ℹ️ 无产物可打包（全量编译未开始或全部失败）")
+        return 0
+    # 用 manifest 传文件列表（避免命令行超长）
+    manifest = release_dir / ".phase1-manifest.txt"
+    manifest.write_text(
+        "\n".join(str(f.relative_to(release_dir)) for f in files),
+        encoding="utf-8",
+    )
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    compressor = pick_compressor()
+    cmd = ["tar", "cf", str(out)]
+    if compressor:
+        cmd += ["--use-compress-program", compressor]
+    # 注意: -C 必须在 -T 之前（-T 文件列表中的相对路径按 -C 目录解析）
+    cmd += ["-C", str(release_dir), "-T", str(manifest)]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    manifest.unlink(missing_ok=True)
+    if result.returncode != 0 or not out.exists():
+        print(f"::error::打包失败: {result.stderr[-300:]}")
+        return 1
+    size_mb = out.stat().st_size / 1024 / 1024
+    print(f"✅ phase1 产物打包: {len(files)} 个文件, {size_mb:.1f} MB → {out}")
+    return 0
+
+
+def cmd_unpack(args):
+    release_dir = Path(args.release_dir)
+    archive = Path(args.input)
+    if not archive.is_file():
+        print(f"::error::产物包不存在: {archive}")
+        return 1
+    release_dir.mkdir(parents=True, exist_ok=True)
+    compressor = pick_compressor()
+    cmd = ["tar", "xf", str(archive)]
+    if compressor:
+        cmd += ["--use-compress-program", compressor]
+    cmd += ["-C", str(release_dir)]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"::warning::产物解压失败（将全量编译）: {result.stderr[-200:]}")
+        return 1
+    print(f"✅ phase1 产物已恢复: {archive} → {release_dir}")
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Merlin 编译产物打包/恢复")
+    sub = parser.add_subparsers(dest="mode", required=True)
+    p_pack = sub.add_parser("pack")
+    p_pack.add_argument("release_dir")
+    p_pack.add_argument("output")
+    p_pack.set_defaults(func=cmd_pack)
+    p_unpack = sub.add_parser("unpack")
+    p_unpack.add_argument("release_dir")
+    p_unpack.add_argument("input")
+    p_unpack.set_defaults(func=cmd_unpack)
+    args = parser.parse_args()
+    sys.exit(args.func(args))
+
+
+if __name__ == "__main__":
+    main()

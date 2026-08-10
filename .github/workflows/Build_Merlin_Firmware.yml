@@ -358,8 +358,28 @@ jobs:
         if: env.SKIP_BUILD != 'true'
         uses: actions/cache/restore@main
         with:
-          path: ${{ github.workspace }}/asuswrt-bcm/release
-          key: merlin-buildtree-v2-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-${{ hashFiles('custom_scripts/patch_xd4_source.sh', 'custom_scripts/*.sh') }}
+          # 只缓存打包后的产物 tar（~400MB，源码不缓存——之前整个 release 超 cache
+          # 限制静默失败，增量从未生效）。key 只含 source_rev：AI fix 改 patch/
+          # workflow 不影响已成功组件产物（patch 改源码后 make 时间戳自动重编受影响组件）
+          path: ${{ github.workspace }}/phase1-artifacts.tar.gz
+          # GitHub cache 不可变：同 key 无法更新，Save 必须用唯一 key（run_id），
+          # Restore 用 restore-keys 前缀匹配最近保存的条目（否则迭代修复时
+          # 缓存永远停留在第一轮，后续成功组件无法固化）
+          key: merlin-buildtree-v3-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-${{ github.run_id }}
+          restore-keys: |
+            merlin-buildtree-v3-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-
+
+      - name: Unpack phase1 artifacts
+        if: env.SKIP_BUILD != 'true'
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/phase1-artifacts.tar.gz" ]; then
+            python3 custom_scripts/pack_build_artifacts.py unpack \
+              "$GITHUB_WORKSPACE/asuswrt-bcm/release" \
+              "$GITHUB_WORKSPACE/phase1-artifacts.tar.gz" \
+              || echo "::warning::产物解压失败，将全量编译"
+          else
+            echo "ℹ️ 无 phase1 产物缓存，将全量编译"
+          fi
 
       - name: Prepare incremental build (phase1 skip + phase2 failed component)
         if: env.SKIP_BUILD != 'true'
@@ -368,26 +388,34 @@ jobs:
         run: |
           RELEASE_DIR="$GITHUB_WORKSPACE/asuswrt-bcm/release"
           # 1) 获取上次失败组件（phase2）：下载最近一次失败 Build run 的 error-log
+          # 收集最近 3 次失败 run 的失败组件（去重）——AI fix 可能一次修多个组件
           FAILED_COMPONENT=""
-          PREV_FAIL=$(gh run list --workflow=Build_Merlin_Firmware.yml --status failure --limit 1 \
-            --json databaseId --jq '.[0].databaseId' 2>/dev/null || echo "")
-          if [ -n "$PREV_FAIL" ] && [ "$PREV_FAIL" != "${{ github.run_id }}" ]; then
-            mkdir -p /tmp/prev_err
-            gh run download "$PREV_FAIL" -n error-log -D /tmp/prev_err 2>/dev/null || true
-            FAILED_COMPONENT=$(grep -oP '(?<=^### 失败组件: ).*?(?= ###)' \
+          while IFS= read -r PREV_FAIL; do
+            [ -z "$PREV_FAIL" ] && continue
+            [ "$PREV_FAIL" = "${{ github.run_id }}" ] && continue
+            rm -rf /tmp/prev_err && mkdir -p /tmp/prev_err
+            gh run download "$PREV_FAIL" -n error-log -D /tmp/prev_err 2>/dev/null || continue
+            C=$(grep -oP '(?<=^### 失败组件: ).*?(?= ###)' \
               /tmp/prev_err/last_error.log 2>/dev/null | head -1 || true)
-          fi
+            [ -n "$C" ] && FAILED_COMPONENT="$FAILED_COMPONENT $C"
+          done < <(gh run list --workflow=Build_Merlin_Firmware.yml --status failure --limit 3 \
+            --json databaseId --jq '.[].databaseId' 2>/dev/null)
+          FAILED_COMPONENT=$(echo $FAILED_COMPONENT | tr ' ' '\n' | sort -u | grep -v '^$' | tr '\n' ' ' | sed 's/ $//')
           # 2) 删除失败组件产物，强制 phase2 重编（make 增量对缺失产物自动重建）
           #    重要: 必须排除 prebuild/ 目录--prebuild 下的 .o 是上游预编译产物
           #    (private.o/nvpriv.o/bcmutils.o 等，源码树无对应 .c 文件)，不是编译输出。
           #    误删会导致 "No rule to make target 'private.c', needed by 'private.o'"
           #    因为 Makefile 的 ifneq($(wildcard ./prebuild/private.o)) 回退到 %.o:%.c。
-          if [ -n "$FAILED_COMPONENT" ] && [ -d "$RELEASE_DIR/src/router/$FAILED_COMPONENT" ]; then
-            echo "🔧 phase2: 强制重编失败组件 $FAILED_COMPONENT"
-            find "$RELEASE_DIR/src/router/$FAILED_COMPONENT" -type f \
-              \( -name '*.o' -o -name '*.a' -o -name '*.so' -o -name '*.lo' \) \
-              -not -path '*/prebuild/*' \
-              -delete 2>/dev/null || true
+          if [ -n "$FAILED_COMPONENT" ]; then
+            echo "🔧 phase2: 强制重编失败组件: $FAILED_COMPONENT"
+            for FC in $FAILED_COMPONENT; do
+              if [ -d "$RELEASE_DIR/src/router/$FC" ]; then
+                find "$RELEASE_DIR/src/router/$FC" -type f \
+                  \( -name '*.o' -o -name '*.a' -o -name '*.so' -o -name '*.lo' -o -name '*.ko' \) \
+                  -not -path '*/prebuild/*' \
+                  -delete 2>/dev/null || true
+              fi
+            done
           fi
           # 3) 时间戳调整：只把产物 touch 到当前时间（比源码解压时间新），使 make 跳过 phase1
           #    注意：绝不能 touch 未来时间戳（会触发 make Clock skew 导致生成步骤失效），
@@ -529,13 +557,21 @@ jobs:
           retention-days: 14
 
       # ===== Phase1 固化：无论成败都保存构建产物（失败时保存已成功组件，供下次增量）=====
+      - name: Pack phase1 artifacts
+        if: ${{ always() && !cancelled() && env.SKIP_BUILD != 'true' }}
+        continue-on-error: true
+        run: |
+          python3 custom_scripts/pack_build_artifacts.py pack \
+            "$GITHUB_WORKSPACE/asuswrt-bcm/release" \
+            "$GITHUB_WORKSPACE/phase1-artifacts.tar.gz" || true
+
       - name: Save phase1 build tree (incremental cache)
         if: ${{ always() && !cancelled() && env.SKIP_BUILD != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@main
         with:
-          path: ${{ github.workspace }}/asuswrt-bcm/release
-          key: merlin-buildtree-v2-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-${{ hashFiles('custom_scripts/patch_xd4_source.sh', 'custom_scripts/*.sh') }}
+          path: ${{ github.workspace }}/phase1-artifacts.tar.gz
+          key: merlin-buildtree-v3-${{ env.REPO_BRANCH }}-${{ steps.source_rev.outputs.source_rev }}-${{ github.run_id }}
 
       - name: Publish release
         if: env.SKIP_BUILD != 'true' && steps.quality_gate.outputs.gate_result == 'pass'
