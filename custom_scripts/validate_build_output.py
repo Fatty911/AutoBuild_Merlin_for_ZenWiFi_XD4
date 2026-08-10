@@ -34,8 +34,9 @@ def find_firmware(expected_pattern: str, minimum_size_mb: float) -> list[Path]:
     matched = []
     for p in all_trx:
         size_mb = p.stat().st_size / 1024 / 1024
-        # trx 头部 (trx_asus) 内嵌 BUILD_NAME，例如 "RT-AX56_XD4,3.0.0.4,386,..."
-        data = p.read_bytes()[:131072]
+        # 机型标识内嵌在固件中（trx_asus 写入 BUILD_NAME）；实测 runner 产物
+        # ~60MB UBI 机型字符串不在前 128KB，必须全文搜索（与 Compute build info 的 grep -a 口径一致）
+        data = p.read_bytes()
         has_model = expected_pattern.encode() in data
         print(f"  - {p.name} ({size_mb:.2f} MB, 机型标识={'✅' if has_model else '❌'})")
         if has_model:
