@@ -3,6 +3,17 @@ run-name: "Prepare (准备构建环境)"
 
 on:
   workflow_dispatch:
+    inputs:
+      branch:
+        description: '上游 SWRT-dev/asuswrt-bcm 分支'
+        type: choice
+        default: '386'
+        options:
+          - '386'
+          - '24353'
+          - 'master'
+  repository_dispatch:
+    types: [Merlin Source Code Update]
   push:
     branches:
       - main

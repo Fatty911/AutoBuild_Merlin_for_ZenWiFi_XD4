@@ -97,6 +97,23 @@ while IFS= read -r d; do
   fi
 done < <(find release/src/router -maxdepth 4 -type d \( -name prebuild -o -name prebuilt \) 2>/dev/null)
 
+# asd 组件：386 分支 prebuild 全机型只有 asd 二进制、无 libasd.so（上游缺失），
+# 而 asd-install 必须安装 libasd.so（本地模拟调试实证：从 master 分支同机型
+# RT-AX56U（同 BCM6755 平台）下载 libasd.so 72472 字节即可通过）。
+ASD_DIR="release/src/router/asd"
+if [ -f "$ASD_DIR/prebuild/RT-AX56_XD4/asd" ] && [ ! -f "$ASD_DIR/prebuild/RT-AX56_XD4/libasd.so" ]; then
+  echo "::warning::386 分支 asd prebuild 缺 libasd.so，从 master 分支补齐（同平台 BCM6755）"
+  if curl -fsSL --max-time 60 -o "$ASD_DIR/prebuild/RT-AX56_XD4/libasd.so" \
+      "https://raw.githubusercontent.com/SWRT-dev/asuswrt-bcm/master/release/src/router/asd/prebuild/RT-AX56U/libasd.so"; then
+    chmod +x "$ASD_DIR/prebuild/RT-AX56_XD4/libasd.so"
+    # Makefile 复制分支会从 prebuild/$(BUILD_NAME)/ 复制到 asd/ 根；此处兜底直接放一份
+    cp -f "$ASD_DIR/prebuild/RT-AX56_XD4/libasd.so" "$ASD_DIR/libasd.so"
+    ls -l "$ASD_DIR/prebuild/RT-AX56_XD4/libasd.so" | awk '{print "✅ libasd.so 就绪: " $5 " 字节"}'
+  else
+    echo "::error::libasd.so 下载失败，asd-install 将失败"
+  fi
+fi
+
 # 双保险: amas_wgn_shared.o 也放进 RT-AX56_XD4 镜像目录
 # （RT-AX56U 的 shared prebuild 缺该文件，从 RT-AX55 补；防止 make 解析路径差异）
 if [ -e "release/src/router/shared/prebuild/RT-AX55/amas_wgn_shared.o" ] && [ ! -e "release/src/router/shared/prebuild/RT-AX56_XD4/amas_wgn_shared.o" ]; then

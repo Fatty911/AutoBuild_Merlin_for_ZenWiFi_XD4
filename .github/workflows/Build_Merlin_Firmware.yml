@@ -25,11 +25,10 @@ on:
   workflow_run:
     workflows: ["Prepare Build Environment"]
     types: [completed]
-  repository_dispatch:
-    types: [Merlin Source Code Update]
-  schedule:
-    # 每 12 小时检查一次上游 386 分支是否有更新，有更新才构建（缓存命中则跳过）
-    - cron: '0 */12 * * *'
+  # 上游更新由 update_checker 检测 → repository_dispatch 触发 Prepare
+  # （打包新源码）→ Prepare 完成后经 workflow_run 自动触发本工作流。
+  # 不再直接监听 repository_dispatch / schedule：避免用旧 prep-env
+  # 编译旧源码或定时空跑（用户要求：确认有更新才触发）。
 
 concurrency:
   # 与 AI Auto Fix Monitor 共享组：Build 与 AI Fix 互斥，不能同时运行
