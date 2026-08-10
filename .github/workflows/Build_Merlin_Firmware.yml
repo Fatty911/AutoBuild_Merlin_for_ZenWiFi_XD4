@@ -281,7 +281,8 @@ jobs:
                      gettext gettext-base autopoint \
                      xsltproc xmlto gtk-doc-tools intltool autogen \
                      autoconf-archive sharutils dos2unix 7zip msmtp \
-                     gperf flex bison; do
+                     gperf flex bison \
+                     libtool libtool-bin automake autoconf; do
             sudo apt-get install -y "$pkg" >/dev/null 2>&1 || echo "跳过: $pkg"
           done
           for must in liblzo2-dev uuid-dev libncurses-dev zlib1g-dev libssl-dev gettext xsltproc; do
