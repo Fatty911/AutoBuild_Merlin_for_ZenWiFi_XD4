@@ -78,32 +78,38 @@ def cmd_pack(args):
 
 
 def prune_half_dirs(release_dir):
-    """清理半成品目录：有产物（.o/.a/.so）但无任何源码文件的目录。
+    """清理 tar 解压型组件的半成品顶层目录。
 
     根因（2026-08-10 增量恢复实测）：老式 Makefile 用
     `if [ ! -e <dir> ]; then tar x ...; fi` 判断是否解压源码包——
     产物目录被恢复后目录存在 → 跳过解压 → configure/Makefile 缺失 →
     `./configure: No such file or directory`（Error 127，config_xz-5.0.3 实例）。
-    删除这些目录后 make 会重新解压源码/生成文件。
+
+    只处理"父目录存在对应源码包（*.tar.*）"的顶层目录：删除后 make 的
+    tar 分支必然重新解压完整源码，绝对安全。不处理深层目录（make 不做
+    目录存在性检查）与 prebuild/prebuilt（git 自带，非 tar 解压）。
     """
-    SRC_MARKERS = (".c", ".h", ".cpp", ".cc", ".S", ".s", ".ac", ".am",
-                   ".sh", ".mk")
     ART_EXT = (".o", ".a", ".so", ".lo", ".ko")
-    # 与 pack 的 EXCLUDE_DIRS 保持一致：prebuild/prebuilt 是上游预编译目录
-    # （git 里就有，不是 make 从 tar 解压的），误删后无法恢复
-    PROTECTED_NAMES = {"prebuild", "prebuilt"}
+    TAR_EXT = (".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tbz2", ".tar")
+    GEN_MARKERS = ("Makefile", "configure", "config.status", "config.log")
     pruned = 0
     for root, dirs, files in os.walk(release_dir, topdown=False):
         # 路径任意组件以 prebuild/prebuilt 开头都保护（目录名带后缀，
-        # 如 prebuilt.hnd_ax / prebuild.RT-AX56U）
+        # 如 prebuilt.hnd_ax / prebuild.RT-AX56U——git 自带，非 tar 解压）
         if any(p.startswith(("prebuild", "prebuilt")) for p in Path(root).parts):
             continue
+        parent = Path(root).parent
+        try:
+            parent_files = os.listdir(parent)
+        except OSError:
+            continue
+        if not any(f.endswith(TAR_EXT) for f in parent_files):
+            continue  # 非 tar 解压型组件，交给 make 自身逻辑
         has_art = any(f.endswith(ART_EXT) for f in files)
-        has_src = any(
-            f.endswith(SRC_MARKERS) or f.startswith("Makefile") or f == "configure"
-            for f in files
-        )
-        if has_art and not has_src and not Path(root).name.startswith("."):
+        # 精确名匹配：Makefile.am/Makefile.in 是源码自带（autoconf 输入），
+        # 只有生成的 Makefile/configure/config.status 才算"完整构建过"
+        has_gen = any(f in GEN_MARKERS for f in files)
+        if has_art and not has_gen:
             shutil.rmtree(root, ignore_errors=True)
             pruned += 1
             print(f"🧹 清理半成品目录: {root}")
