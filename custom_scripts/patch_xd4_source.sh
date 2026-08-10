@@ -70,6 +70,26 @@ fi
 # 仅匹配 prebuild 时 libbcm/prebuilt/RT-AX56_XD4 不会被创建，导致
 # libbcm Makefile 'cp -f ./prebuilt/RT-AX56_XD4/libbcm.so' 失败 (Error 1)。
 # XD4 与 RT-AX56U 同平台 BCM6755，产物兼容。
+# 先恢复 runner clone 偶发未 checkout 的 prebuild/prebuilt 内容
+# （libbcmcrypto/prebuilt.hnd_ax、asd/prebuild 等目录存在但为空/缺机型子目录），
+# 必须在 .git 未删时执行（Prepare 的 Package 步骤会删 .git）
+# 1) 已知关键目录无条件 git checkout（目录整体缺失时 find 循环不触发）
+for p in \
+  release/src/router/asd/prebuild \
+  release/src/router/libbcmcrypto/prebuilt.hnd_ax \
+  release/src/router/libbcmcrypto/prebuilt.hnd \
+  release/src/router/libbcm/prebuilt ; do
+  if git checkout HEAD -- "$p" 2>/dev/null; then
+    echo "✅ git 恢复: $p"
+  fi
+done
+# 2) 其余 prebuild/prebuilt 目录：存在但内容为空时也恢复
+while IFS= read -r d; do
+  if [ -d "$d" ] && [ -z "$(find "$d" -maxdepth 2 -type f 2>/dev/null | head -1)" ]; then
+    echo "::warning::$d 内容缺失（runner clone 未 checkout），从 git 恢复"
+    git checkout HEAD -- "$d" 2>/dev/null || echo "::warning::git 恢复失败: $d"
+  fi
+done < <(find release/src/router -maxdepth 4 -type d \( -name prebuild -o -name prebuilt \) 2>/dev/null)
 while IFS= read -r d; do
   if [ -d "$d/RT-AX56U" ] && [ ! -e "$d/RT-AX56_XD4" ]; then
     cp -ar "$d/RT-AX56U" "$d/RT-AX56_XD4"
