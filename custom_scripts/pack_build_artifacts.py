@@ -77,6 +77,39 @@ def cmd_pack(args):
     return 0
 
 
+def prune_half_dirs(release_dir):
+    """清理半成品目录：有产物（.o/.a/.so）但无任何源码文件的目录。
+
+    根因（2026-08-10 增量恢复实测）：老式 Makefile 用
+    `if [ ! -e <dir> ]; then tar x ...; fi` 判断是否解压源码包——
+    产物目录被恢复后目录存在 → 跳过解压 → configure/Makefile 缺失 →
+    `./configure: No such file or directory`（Error 127，config_xz-5.0.3 实例）。
+    删除这些目录后 make 会重新解压源码/生成文件。
+    """
+    SRC_MARKERS = (".c", ".h", ".cpp", ".cc", ".S", ".s", ".ac", ".am",
+                   ".sh", ".mk")
+    ART_EXT = (".o", ".a", ".so", ".lo", ".ko")
+    # 与 pack 的 EXCLUDE_DIRS 保持一致：prebuild/prebuilt 是上游预编译目录
+    # （git 里就有，不是 make 从 tar 解压的），误删后无法恢复
+    PROTECTED_NAMES = {"prebuild", "prebuilt"}
+    pruned = 0
+    for root, dirs, files in os.walk(release_dir, topdown=False):
+        # 路径任意组件以 prebuild/prebuilt 开头都保护（目录名带后缀，
+        # 如 prebuilt.hnd_ax / prebuild.RT-AX56U）
+        if any(p.startswith(("prebuild", "prebuilt")) for p in Path(root).parts):
+            continue
+        has_art = any(f.endswith(ART_EXT) for f in files)
+        has_src = any(
+            f.endswith(SRC_MARKERS) or f.startswith("Makefile") or f == "configure"
+            for f in files
+        )
+        if has_art and not has_src and not Path(root).name.startswith("."):
+            shutil.rmtree(root, ignore_errors=True)
+            pruned += 1
+            print(f"🧹 清理半成品目录: {root}")
+    return pruned
+
+
 def cmd_unpack(args):
     release_dir = Path(args.release_dir)
     archive = Path(args.input)
@@ -94,6 +127,9 @@ def cmd_unpack(args):
         print(f"::warning::产物解压失败（将全量编译）: {result.stderr[-200:]}")
         return 1
     print(f"✅ phase1 产物已恢复: {archive} → {release_dir}")
+    pruned = prune_half_dirs(release_dir)
+    if pruned:
+        print(f"✅ 半成品目录清理完成（{pruned} 个，make 将重新解压源码）")
     return 0
 
 
