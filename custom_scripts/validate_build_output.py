@@ -2,7 +2,7 @@
 """ZenWiFi XD4 Merlin 固件构建质量门。
 
 检查:
-1. 固件文件存在且文件名匹配预期机型模式 (RT-AX56_XD4_*.trx)
+1. 固件文件存在且文件名匹配预期机型模式 (RT-AX56_XD4_*.w)
 2. 固件大小 >= 最小阈值
 3. 软件中心 (softcenter) 已集成在源码中
 
@@ -28,9 +28,9 @@ def find_firmware(expected_pattern: str, minimum_size_mb: float) -> list[Path]:
     if not image_dir.is_dir():
         print(f"❌ 输出目录不存在: {image_dir}")
         return []
-    all_trx = sorted(image_dir.glob("*.trx"))
+    all_trx = sorted(image_dir.glob("*.w"))
     print(f"输出目录: {image_dir}")
-    print(f"找到 .trx 文件: {len(all_trx)}")
+    print(f"找到 .w 文件: {len(all_trx)}")
     matched = []
     for p in all_trx:
         size_mb = p.stat().st_size / 1024 / 1024

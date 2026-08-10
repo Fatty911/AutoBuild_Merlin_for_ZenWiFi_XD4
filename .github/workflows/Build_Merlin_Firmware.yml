@@ -473,10 +473,10 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE/asuswrt-bcm/release/$SDK_DIR"
           # 文件名不含机型（IMGNAME=版本号格式），机型标识内嵌在 trx 头部 (trx_asus -r BUILD_NAME,...)
-          FW_FILE=$(ls image/*.trx 2>/dev/null | head -1)
+          FW_FILE=$(ls image/*.w 2>/dev/null | grep -v cferom | head -1)
           echo "FW_FILE=$FW_FILE" >> "$GITHUB_ENV"
           if [ -n "$FW_FILE" ] && grep -qa 'RT-AX56_XD4' "$FW_FILE"; then
-            FW_VERSION=$(basename "$FW_FILE" .trx)
+            FW_VERSION=$(basename "$FW_FILE" .w)
             echo "FW_VERSION=$FW_VERSION" >> "$GITHUB_ENV"
             echo "找到固件: $FW_FILE (trx 头部含 RT-AX56_XD4)"
           else
@@ -522,7 +522,7 @@ jobs:
         with:
           name: Merlin_XD4_${{ env.FW_VERSION }}_${{ github.run_number }}
           path: |
-            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.trx
+            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.w
             ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.sha256
             ${{ github.workspace }}/firmware-info.txt
             ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/build.log
@@ -543,17 +543,17 @@ jobs:
         uses: softprops/action-gh-release@master
         with:
           files: |
-            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.trx
+            ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.w
             ${{ github.workspace }}/asuswrt-bcm/release/${{ env.SDK_DIR }}/image/*.sha256
             ${{ github.workspace }}/firmware-info.txt
           name: ${{ env.FW_VERSION }}
           tag_name: Merlin_XD4_${{ env.FW_VERSION }}_${{ github.run_number }}
           body: |
             华硕 ZenWiFi XD4 梅林固件 (SWRT/MerlinR 386 分支, 内置软件中心)
-            - 固件: `${{ env.FW_VERSION }}.trx`
+            - 固件: `${{ env.FW_VERSION }}.w`
             - 来源: ${{ env.SOURCE }} @ ${{ steps.source_rev.outputs.source_rev_short }}
             - 软件中心: 已集成，刷机后可安装第三方插件（fancyss 等）
-            - 刷机: 路由器管理页 → 系统管理 → 固件升级 → 选择 .trx 文件
+            - 刷机: 路由器管理页 → 系统管理 → 固件升级 → 选择 .w 文件
 
       - name: Cleanup old releases
         if: env.SKIP_BUILD != 'true' && steps.publish_release.outcome == 'success'
