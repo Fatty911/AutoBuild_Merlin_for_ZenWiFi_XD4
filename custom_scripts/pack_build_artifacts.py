@@ -23,8 +23,13 @@ from pathlib import Path
 EXTENSIONS = (".o", ".a", ".so", ".lo", ".ko")
 # 只排除明确目录：prebuild/prebuilt 是上游预编译（源码树已有，无需打包）；
 # .git/dl/image/targets 非产物。注意不能排除所有点目录——libtool 构建的
-# .libs/ 子目录存放库产物（.o/.a/.so），漏打包会导致增量恢复链接失败
-EXCLUDE_DIRS = {"prebuild", "prebuilt", ".git", "dl", "image", "targets"}
+# .libs/ 子目录存放库产物（.o/.a/.so），漏打包会导致增量恢复链接失败。
+# hostTools 整体退出增量（实测 2026-08-11）：其 tar 解压型组件（xz 等）
+# 增量恢复会生成"有产物无 configure"的半成品目录，make 的 tar 分支有
+# || true 吞错风险、configure 存在性反复出问题——hostTools 每次全量
+# 重编仅 3-5 分钟，换取彻底稳定
+EXCLUDE_DIRS = {"prebuild", "prebuilt", ".git", "dl", "image", "targets",
+                "hostTools"}
 
 
 def pick_compressor():
