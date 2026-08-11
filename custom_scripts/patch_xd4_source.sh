@@ -24,6 +24,8 @@ if [ -d "$HOSTTOOLS_DIR" ]; then
   for pkg in *.tar.bz2 *.tar.gz *.tar.xz *.tgz; do
     [ -f "$pkg" ] || continue
     dir="${pkg%.tar.*}"
+    # .tgz 不含 .tar. 前缀，单独剥离（否则 dir 保留 .tgz 后缀破坏幂等）
+    [ "$dir" = "$pkg" ] && dir="${pkg%.tgz}"
     if [ -d "$dir" ]; then
       continue
     fi
