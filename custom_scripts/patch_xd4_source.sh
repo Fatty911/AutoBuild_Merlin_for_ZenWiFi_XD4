@@ -13,6 +13,29 @@ set -euo pipefail
 REPO_DIR="${1:?用法: patch_xd4_source.sh <asuswrt-bcm 目录>}"
 cd "$REPO_DIR"
 
+# 预解压 hostTools 源码包（2026-08-11 实测）：runner 上 make 的
+# `tar xkfj xz-5.0.3.tar.bz2` 解压不可靠（Build#5/6/7 连续失败——
+# 解压失败被 || true 吞掉 → configure 缺失），本地验证包本身完好。
+# 在 Prepare 阶段（打包进 prep-env）预解压，Build 时 make 的
+# `[ ! -e <dir> ]` 判定目录已存在 → 跳过解压 → 直接用完整源码编译。
+HOSTTOOLS_DIR="$REPO_DIR/release/src-rt-5.02axhnd.675x/hostTools"
+if [ -d "$HOSTTOOLS_DIR" ]; then
+  cd "$HOSTTOOLS_DIR"
+  for pkg in *.tar.bz2 *.tar.gz *.tar.xz *.tgz; do
+    [ -f "$pkg" ] || continue
+    dir="${pkg%.tar.*}"
+    if [ -d "$dir" ]; then
+      continue
+    fi
+    if tar xf "$pkg"; then
+      echo "✅ 预解压 $pkg → $dir"
+    else
+      echo "::warning::预解压失败 $pkg（Build 时 make 会再尝试）"
+    fi
+  done
+  cd "$REPO_DIR"
+fi
+
 TARGET_MAK="buildtools/target.mak.3004"
 
 if grep -q "RT-AX56_XD4 :=" "$TARGET_MAK"; then
