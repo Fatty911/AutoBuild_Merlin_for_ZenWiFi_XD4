@@ -37,7 +37,13 @@ def pick_compressor():
 def collect_files(release_dir):
     files = []
     for root, dirs, fnames in os.walk(release_dir):
-        dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+        # 例外：hnd_extra/prebuilt 是构建生成物（busybox 构建链生成，上游
+        # git 没有），必须打包——否则增量恢复后 busybox 重编缺 detect_opt.o
+        dirs[:] = [
+            d for d in dirs
+            if d not in EXCLUDE_DIRS
+            or (d == "prebuilt" and "hnd_extra" in Path(root).parts)
+        ]
         for fn in fnames:
             if fn.endswith(EXTENSIONS):
                 files.append(Path(root) / fn)
@@ -110,9 +116,25 @@ def prune_half_dirs(release_dir):
         # 只有生成的 Makefile/configure/config.status 才算"完整构建过"
         has_gen = any(f in GEN_MARKERS for f in files)
         if has_art and not has_gen:
+            # 找到匹配的源码包（如 xz-5.0.3 → xz-5.0.3.tar.bz2）
+            pkg = next(
+                (f for f in parent_files
+                 if f.endswith(TAR_EXT) and f.startswith(Path(root).name + ".")),
+                None,
+            )
             shutil.rmtree(root, ignore_errors=True)
             pruned += 1
-            print(f"🧹 清理半成品目录: {root}")
+            if pkg:
+                # 立即重新解压补全（不等 make：其 tar 分支有 || true 吞错风险，
+                # 且源码树自带目录时 make 会跳过解压直接失败）
+                r = subprocess.run(
+                    ["tar", "xf", str(parent / pkg), "-C", str(parent)],
+                    capture_output=True, text=True,
+                )
+                print(f"🧹 清理半成品目录: {root} → 已重新解压 {pkg}"
+                      + ("" if r.returncode == 0 else f"（解压失败: {r.stderr[-120:]}）"))
+            else:
+                print(f"🧹 清理半成品目录: {root}")
     return pruned
 
 
