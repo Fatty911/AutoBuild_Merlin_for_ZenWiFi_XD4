@@ -123,7 +123,7 @@ def get_review_models():
             "name": "DEEPSEEK",
             "proxy_url": "https://api.deepseek.com/v1",
             "api_key": deepseek_key,
-            "model": os.getenv("DEEPSEEK_REVIEW_MODEL", "deepseek-v4-flash"),
+            "model": os.getenv("DEEPSEEK_REVIEW_MODEL", "deepseek-v4-pro"),
         })
 
     return models
