@@ -10,6 +10,10 @@
 # 使 386 分支也能构建 XD4 专用配置 (BRCM_BOARD_ID="XD4")。
 set -euo pipefail
 
+# 脚本自身目录: 必须在任何 cd 之前解析 (CNB 以相对路径调用, 且调用后 CWD 会
+# 进入源码目录, 后补的相对路径解析会失败 — 2026-09-28 CNB 首跑实测)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 REPO_DIR="${1:?用法: patch_xd4_source.sh <asuswrt-bcm 目录>}"
 cd "$REPO_DIR"
 
@@ -534,7 +538,7 @@ ls "$RSDIR/hostTools/prebuilt/RT-AX56_XD4/addvtoken" >/dev/null && echo "prebuil
 # dev_queue_xmit_nit() 在抓包 tap 活跃时以默认 net_ratelimit (10 条/5 秒)
 # 逐条打印。修复: 该告警点收紧为 1 条/10 分钟, 数据面与丢包行为不变。
 # 补丁应用失败按构建失败处理 (宁可不发固件, 不发静默未修复的固件)。
-PATCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches"
+PATCH_DIR="$SCRIPT_DIR/patches"
 KERNEL_DEV_C="release/src-rt-5.02axhnd.675x/kernel/linux-4.1/net/core/dev.c"
 ARCHER_PATCH="$PATCH_DIR/0001-net-core-tighten-buggy-protocol-warn-ratelimit.patch"
 if [ ! -f "$REPO_DIR/$KERNEL_DEV_C" ]; then
@@ -551,4 +555,4 @@ else
   echo "::error::archer 风暴修复补丁应用失败 (上游 dev.c 可能已漂移, 需更新补丁)"
   exit 1
 fi
-grep -c "buggy_proto_rs" "$KERNEL_DEV_C" | xargs echo "archer 风暴修复标记出现次数:"
+grep -c "buggy_proto_rs" "$REPO_DIR/$KERNEL_DEV_C" | xargs echo "archer 风暴修复标记出现次数:"
