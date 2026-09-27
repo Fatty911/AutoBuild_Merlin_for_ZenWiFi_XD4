@@ -38,6 +38,9 @@
               dpkg -s "$must" >/dev/null 2>&1 || { echo "关键依赖未安装: $must"; exit 1; }
             done
             id builder >/dev/null 2>&1 || useradd -m -s /bin/bash builder
+            usermod -aG sudo builder 2>/dev/null || true
+            echo "builder ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/builder
+            chmod 440 /etc/sudoers.d/builder
             chown -R builder:builder "$PWD" /home/builder
         - name: 克隆上游源码 (SWRT 386)
           script: |
@@ -54,14 +57,32 @@
           script: |
             runuser -u builder -- env HOME=/home/builder bash -c '
               set -e
-              mkdir -p "$HOME/toolchains"
+              mkdir -p "/home/builder/toolchains"
               git clone --depth 1 --no-checkout --single-branch \
-                https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd"
-              git -C "$HOME/toolchains/bcmhnd" archive --format=tar HEAD | tar x -C "$HOME/toolchains/bcmhnd"
+                https://github.com/SWRT-dev/bcmhnd-toolchains "/home/builder/toolchains/bcmhnd"
+              git -C "/home/builder/toolchains/bcmhnd" archive --format=tar HEAD | tar x -C "/home/builder/toolchains/bcmhnd"
               git clone --depth 1 --no-checkout --single-branch \
-                https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm"
-              git -C "$HOME/toolchains/bcm" archive --format=tar HEAD | tar x -C "$HOME/toolchains/bcm"
+                https://github.com/SWRT-dev/bcm-toolchains "/home/builder/toolchains/bcm"
+              git -C "/home/builder/toolchains/bcm" archive --format=tar HEAD | tar x -C "/home/builder/toolchains/bcm"
             '
+        - name: 挂载工具链到 /opt (root)
+          script: |
+            sudo mkdir -p /opt/toolchains /projects/bca/tools/linux/bin
+            sudo chown -R builder /opt/toolchains /projects
+            ln -sf "/home/builder/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
+            ln -sf "/home/builder/toolchains/bcmhnd"/crosstools-arm-gcc-5.3-linux-4.1-glibc-2.22-binutils-2.25 /opt/toolchains/
+            ln -sf "/home/builder/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.3-linux-4.1-glibc-2.24-binutils-2.25 /opt/toolchains/
+            ln -sf "/home/builder/toolchains/bcmhnd"/crosstools-aarch64-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1 /opt/toolchains/
+            ln -sf "/home/builder/toolchains/bcmhnd"/crosstools-arm-gcc-5.3-linux-4.1-glibc-2.24-binutils-2.25 /opt/toolchains/
+            ln -sf "/home/builder/toolchains/bcmhnd"/crosstools-arm-gcc-5.5-linux-4.1-glibc-2.26-binutils-2.28.1 /opt/toolchains/
+            ln -sf "/home/builder/toolchains/bcmhnd"/crosstools-gcc-5.3-linux-4.1-uclibc-1.0.12-glibc-2.24-binutils-2.25 /opt/toolchains/
+            ln -sf "/home/builder/toolchains/bcmhnd"/crosstools-aarch64-gcc-9.2-linux-4.19-glibc-2.30-binutils-2.32 /opt/toolchains/
+            ln -sf "/home/builder/toolchains/bcmhnd"/crosstools-arm-gcc-9.2-linux-4.19-glibc-2.30-binutils-2.32 /opt/toolchains/
+            ln -sf "/home/builder/toolchains/bcm"/hndtools-arm-linux-2.6.36-uclibc-4.5.3 /opt/toolchains/
+            ln -sf "/home/builder/toolchains/bcm"/hndtools-armeabi-2013.11 /projects/bca/tools/linux/
+            ln -sf "/home/builder/toolchains/bcm"/fwtag.ini /projects/bca/tools/linux/bin/
+            ln -sf /projects/bca /projects/hnd
+            ls /opt/toolchains/ | wc -l | xargs echo "toolchain links:"
         - name: 编译 rt-ax56_xd4
           script: |
             runuser -u builder -- env HOME=/home/builder bash -c '
