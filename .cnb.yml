@@ -84,6 +84,7 @@
             ln -sf /projects/bca /projects/hnd
             ls /opt/toolchains/ | wc -l | xargs echo "toolchain links:"
         - name: 编译 rt-ax56_xd4
+          timeout: 6h
           script: |
             runuser -u builder -- env HOME=/home/builder bash -c '
               set -e
@@ -92,9 +93,16 @@
               git config --global user.email "xuerui911@gmail.com"
               export TMPDIR="$PWD/tmp" TMP="$PWD/tmp" TEMP="$PWD/tmp"
               export XDG_CACHE_HOME="$PWD/.cache" CCACHE_DIR="$PWD/ccache"
+              # make 全量输出进 build.log; 心跳每 60s 打一行尾部日志, 避免 CNB
+              # 10 分钟无输出超时杀任务 (2026-09-28 实测死于 600090ms)
               make -C asuswrt-bcm/release/src-rt-5.02axhnd.675x rt-ax56_xd4 \
-                > asuswrt-bcm/release/src-rt-5.02axhnd.675x/build.log 2>&1 \
-                || { tail -60 asuswrt-bcm/release/src-rt-5.02axhnd.675x/build.log; exit 1; }
+                > asuswrt-bcm/release/src-rt-5.02axhnd.675x/build.log 2>&1 &
+              MPID=$!
+              while kill -0 $MPID 2>/dev/null; do
+                sleep 60
+                echo "[heartbeat] $(date +%H:%M:%S) $(tail -c 100 asuswrt-bcm/release/src-rt-5.02axhnd.675x/build.log | tr "\n" " ")"
+              done
+              wait $MPID || { tail -60 asuswrt-bcm/release/src-rt-5.02axhnd.675x/build.log; exit 1; }
               tail -15 asuswrt-bcm/release/src-rt-5.02axhnd.675x/build.log
             '
         - name: 质量门
