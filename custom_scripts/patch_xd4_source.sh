@@ -16,6 +16,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 REPO_DIR="${1:?用法: patch_xd4_source.sh <asuswrt-bcm 目录>}"
 cd "$REPO_DIR"
+# 绝对化: CNB 以相对路径调用, cd 之后一切 "$REPO_DIR/..." 引用若仍是相对路径
+# 会变成 嵌套双前缀 (2026-09-28 CNB 实测 archer 补丁段未找到 dev.c)
+REPO_DIR="$PWD"
 
 # 预解压 hostTools 源码包（2026-08-11 实测）：runner 上 make 的
 # `tar xkfj xz-5.0.3.tar.bz2` 解压不可靠（Build#5/6/7 连续失败——
@@ -508,7 +511,7 @@ fi
 # 双保险：prebuilt.hnd_ax 从 git 恢复（runner 环境实测整个目录空——clone
 # 偶发未 checkout .o 文件；无条件执行（不依赖空判断，避免条件误判）。
 # WSL 验证：git checkout HEAD -- <path> 可恢复全部 13 个 .o。
-if [ -d "$1/.git" ]; then
+if [ -d "$REPO_DIR/.git" ]; then
   if (cd "$1" && git checkout HEAD -- release/src/router/libbcmcrypto/prebuilt.hnd_ax/ 2>&1 | tail -3); then
     echo "✅ libbcmcrypto prebuilt.hnd_ax git 恢复完成 ($(ls "$LBC_PB" 2>/dev/null | wc -l) 文件)"
   else
