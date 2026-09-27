@@ -137,14 +137,85 @@
               } > dist/firmware-info.txt
               ls -la dist/
             '
-        - name: 发布 CNB Release
-          type: git:release
-          options:
-            description: "华硕 ZenWiFi XD4 梅林固件 (SWRT/MerlinR 386 分支, 内置软件中心, 含 archer 日志风暴修复)"
-            overlying: true
-            latest: true
-        - name: 上传 Release 附件
-          image: cnbcool/attachments:latest
-          settings:
-            attachments:
-              - "./dist/*"
+        - name: 发布 Release (API, 幂等)
+          script: |
+            CNB_TOKEN="$CNB_TOKEN" python3 <<'PYEOF'
+            # 内置 git:release 任务 push 事件下 tagname 为空必失败(2026-09-28 实测),
+            # cnbcool/attachments 仓库公开不可见无法核实参数; 故改用官方 Release
+            # REST API: 建/更 release + 预签名URL上传附件。流程已于本机实测打通。
+            import base64, glob, json, os, sys, urllib.error, urllib.request
+            API = ("https://api.cnb.cool/"
+                   "xuerui911-mirror/AutoBuild_Merlin_for_ZenWiFi_XD4")
+            TAG = "auto-build"
+            TOKEN = os.environ.get("CNB_TOKEN", "")
+            if not TOKEN:
+                print("[FAIL] CNB_TOKEN 环境变量不存在"); sys.exit(1)
+            AUTH = "Basic " + base64.b64encode(f"cnb:{TOKEN}".encode()).decode()
+
+            def call(path, method="GET", form=None, raw=None):
+                r = urllib.request.Request(API + path, method=method)
+                r.add_header("Accept", "application/json")
+                r.add_header("Authorization", AUTH)
+                body = None
+                if form is not None:
+                    body = json.dumps(form, ensure_ascii=False).encode("utf-8")
+                    r.add_header("Content-Type", "application/json; charset=utf-8")
+                elif raw is not None:
+                    body = raw
+                try:
+                    with urllib.request.urlopen(r, body, timeout=300) as resp:
+                        return resp.status, resp.read()
+                except urllib.error.HTTPError as e:
+                    return e.code, e.read()
+
+            files = sorted(glob.glob("dist/*"))
+            if not files:
+                print("[FAIL] dist/ 无产物"); sys.exit(1)
+
+            body_txt = ("SWRT/Merlin 386 分支自动构建, 内置软件中心。\n\n"
+                        "含 archer 日志风暴修复: 内核 dev_queue_xmit_nit 的"
+                        " protocol-0000 告警限频为 1 条/10 分钟, 数据面无影响。\n\n")
+            info = "dist/firmware-info.txt"
+            if os.path.isfile(info):
+                body_txt += open(info, encoding="utf-8", errors="replace").read()
+
+            meta = {"tag_name": TAG,
+                    "name": "XD4 梅林固件自动构建 (386, 含 archer 日志风暴修复)",
+                    "body": body_txt, "draft": False, "prerelease": False,
+                    "make_latest": "true",
+                    "target_commitish": os.environ.get("CNB_COMMIT", "")}
+            if not meta["target_commitish"]:
+                del meta["target_commitish"]
+            st, data = call(f"/-/releases/tags/{TAG}")
+            if st == 200:
+                rel = json.loads(data)
+                st, data = call(f"/-/releases/{rel['id']}", method="PATCH", form=meta)
+                print("[OK] release 已更新:", st)
+            else:
+                st, data = call("/-/releases", method="POST", form=meta)
+                print("[OK] release 已创建:", st)
+            if st not in (200, 201):
+                print("[FAIL] release 写入失败", st, data[:300]); sys.exit(1)
+            rel = json.loads(data)
+
+            for f in files:
+                if os.path.isdir(f):
+                    continue
+                size = os.path.getsize(f)
+                st, data = call(f"/-/releases/{rel['id']}/asset-upload-url",
+                                method="POST",
+                                form={"asset_name": os.path.basename(f),
+                                      "overwrite": True, "size": size, "ttl": 180})
+                if st != 200:
+                    print(f"[FAIL] {f} 取上传URL失败", st, data[:200]); sys.exit(1)
+                up = json.loads(data)
+                st, data = call(up["upload_url"], method="PUT",
+                                raw=open(f, "rb").read())
+                if st != 200:
+                    print(f"[FAIL] {f} PUT 失败", st, data[:200]); sys.exit(1)
+                st, data = call(up["verify_url"], method="POST")
+                if st not in (200, 201):
+                    print(f"[FAIL] {f} 确认失败", st, data[:200]); sys.exit(1)
+                print(f"[OK] 附件: {os.path.basename(f)} ({size} bytes)")
+            print("[DONE] Release:", TAG)
+            PYEOF
