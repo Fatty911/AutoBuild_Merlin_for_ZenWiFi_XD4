@@ -6,7 +6,9 @@
 #
 # v1 与 GH 链路的差异:
 # - 无 Prepare/Build 两段拆分与 prep-env 缓存, 单流水线每次全量构建;
-# - 产物直接发成 CNB Release (git:release + attachments), 旧版清理暂未实现。
+# - 产物直接发成 CNB Release (git:release + attachments), 旧版清理暂未实现;
+# - CNB 容器默认 root, 而上游 make.common prebuild_checks 拒绝 root 构建
+#   (2026-09-28 首跑实测) → 依赖阶段创建 builder 用户, 后续阶段 runuser 执行。
 "**":
   push:
     - name: merlin-xd4-firmware
@@ -35,61 +37,77 @@
             for must in build-essential flex bison gawk liblzo2-dev libncurses-dev zlib1g-dev libssl-dev; do
               dpkg -s "$must" >/dev/null 2>&1 || { echo "关键依赖未安装: $must"; exit 1; }
             done
+            id builder >/dev/null 2>&1 || useradd -m -s /bin/bash builder
+            chown -R builder:builder "$PWD" /home/builder
         - name: 克隆上游源码 (SWRT 386)
           script: |
-            git clone --depth 1 --single-branch --branch 386 \
-              https://github.com/SWRT-dev/asuswrt-bcm asuswrt-bcm
-            git -C asuswrt-bcm rev-parse HEAD | tee prep-source-rev.txt
+            runuser -u builder -- env HOME=/home/builder bash -c '
+              git clone --depth 1 --single-branch --branch 386 \
+                https://github.com/SWRT-dev/asuswrt-bcm asuswrt-bcm
+              git -C asuswrt-bcm rev-parse HEAD | tee prep-source-rev.txt
+            '
         - name: 应用 XD4 补丁 (含 archer 日志风暴修复)
-          script: bash custom_scripts/patch_xd4_source.sh asuswrt-bcm
+          script: |
+            runuser -u builder -- env HOME=/home/builder \
+              bash custom_scripts/patch_xd4_source.sh asuswrt-bcm
         - name: 工具链 (bcmhnd + bcm)
           script: |
-            mkdir -p "$HOME/toolchains"
-            git clone --depth 1 --no-checkout --single-branch \
-              https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd"
-            git -C "$HOME/toolchains/bcmhnd" archive --format=tar HEAD | tar x -C "$HOME/toolchains/bcmhnd"
-            git clone --depth 1 --no-checkout --single-branch \
-              https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm"
-            git -C "$HOME/toolchains/bcm" archive --format=tar HEAD | tar x -C "$HOME/toolchains/bcm"
+            runuser -u builder -- env HOME=/home/builder bash -c '
+              set -e
+              mkdir -p "$HOME/toolchains"
+              git clone --depth 1 --no-checkout --single-branch \
+                https://github.com/SWRT-dev/bcmhnd-toolchains "$HOME/toolchains/bcmhnd"
+              git -C "$HOME/toolchains/bcmhnd" archive --format=tar HEAD | tar x -C "$HOME/toolchains/bcmhnd"
+              git clone --depth 1 --no-checkout --single-branch \
+                https://github.com/SWRT-dev/bcm-toolchains "$HOME/toolchains/bcm"
+              git -C "$HOME/toolchains/bcm" archive --format=tar HEAD | tar x -C "$HOME/toolchains/bcm"
+            '
         - name: 编译 rt-ax56_xd4
           script: |
-            apt-get install -y libtool automake autoconf >/dev/null 2>&1 || true
-            mkdir -p "$PWD/tmp" "$PWD/.cache" "$PWD/ccache"
-            git config --global user.name "Fatty911"
-            git config --global user.email "xuerui911@gmail.com"
-            export TMPDIR="$PWD/tmp" TMP="$PWD/tmp" TEMP="$PWD/tmp"
-            export XDG_CACHE_HOME="$PWD/.cache" CCACHE_DIR="$PWD/ccache"
-            make -C asuswrt-bcm/release/src-rt-5.02axhnd.675x rt-ax56_xd4 \
-              > asuswrt-bcm/release/src-rt-5.02axhnd.675x/build.log 2>&1 \
-              || { tail -60 asuswrt-bcm/release/src-rt-5.02axhnd.675x/build.log; exit 1; }
-            tail -15 asuswrt-bcm/release/src-rt-5.02axhnd.675x/build.log
+            runuser -u builder -- env HOME=/home/builder bash -c '
+              set -e
+              mkdir -p "$PWD/tmp" "$PWD/.cache" "$PWD/ccache"
+              git config --global user.name "Fatty911"
+              git config --global user.email "xuerui911@gmail.com"
+              export TMPDIR="$PWD/tmp" TMP="$PWD/tmp" TEMP="$PWD/tmp"
+              export XDG_CACHE_HOME="$PWD/.cache" CCACHE_DIR="$PWD/ccache"
+              make -C asuswrt-bcm/release/src-rt-5.02axhnd.675x rt-ax56_xd4 \
+                > asuswrt-bcm/release/src-rt-5.02axhnd.675x/build.log 2>&1 \
+                || { tail -60 asuswrt-bcm/release/src-rt-5.02axhnd.675x/build.log; exit 1; }
+              tail -15 asuswrt-bcm/release/src-rt-5.02axhnd.675x/build.log
+            '
         - name: 质量门
           script: |
-            export GITHUB_WORKSPACE="$PWD"
-            SOURCE=SWRT_Merlin_386 EXPECTED_MODEL_PATTERN=RT-AX56_XD4 MIN_FIRMWARE_SIZE_MB=10 \
-              python3 custom_scripts/validate_build_output.py --gate
+            runuser -u builder -- env HOME=/home/builder GITHUB_WORKSPACE="$PWD" bash -c '
+              SOURCE=SWRT_Merlin_386 EXPECTED_MODEL_PATTERN=RT-AX56_XD4 MIN_FIRMWARE_SIZE_MB=10 \
+                python3 custom_scripts/validate_build_output.py --gate
+            '
         - name: 收集产物
           script: |
-            FW_DIR="asuswrt-bcm/release/src-rt-5.02axhnd.675x/image"
-            FW_FILE=$(ls "$FW_DIR"/*.w 2>/dev/null | grep -v cferom | head -1)
-            if [ -z "$FW_FILE" ] || ! grep -qa 'RT-AX56_XD4' "$FW_FILE"; then
-              echo "未找到 XD4 固件输出"
-              ls -la "$FW_DIR" 2>/dev/null || true
-              exit 1
-            fi
-            mkdir -p dist
-            sha256sum "$FW_FILE" > "$FW_FILE.sha256"
-            cp -f "$FW_FILE" "$FW_FILE.sha256" dist/
-            {
-              echo "固件: $(basename "$FW_FILE")"
-              echo "来源: SWRT_Merlin_386"
-              echo "上游: https://github.com/SWRT-dev/asuswrt-bcm @ 386 ($(cat prep-source-rev.txt))"
-              echo "构建时间: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %Z')"
-              echo "软件中心: 已集成 (release/src/router/softcenter)"
-              echo "SHA256: $(awk '{print $1}' "$FW_FILE.sha256")"
-              echo "修复: 内核 dev_queue_xmit_nit 'protocol 0000 is buggy' 日志风暴限速 (1条/10分钟)"
-            } > dist/firmware-info.txt
-            ls -la dist/
+            runuser -u builder -- env HOME=/home/builder bash -c '
+              set -e
+              FW_DIR="asuswrt-bcm/release/src-rt-5.02axhnd.675x/image"
+              FW_FILE=$(ls "$FW_DIR"/*.w 2>/dev/null | grep -v cferom | head -1)
+              if [ -z "$FW_FILE" ] || ! grep -qa "RT-AX56_XD4" "$FW_FILE"; then
+                echo "未找到 XD4 固件输出"
+                ls -la "$FW_DIR" 2>/dev/null || true
+                exit 1
+              fi
+              mkdir -p dist
+              sha256sum "$FW_FILE" > "$FW_FILE.sha256"
+              cp -f "$FW_FILE" "$FW_FILE.sha256" dist/
+              REVISION=$(cat prep-source-rev.txt)
+              {
+                echo "固件: $(basename "$FW_FILE")"
+                echo "来源: SWRT_Merlin_386"
+                echo "上游: https://github.com/SWRT-dev/asuswrt-bcm @ 386 ($REVISION)"
+                echo "构建时间: $(TZ=Asia/Shanghai date "+%Y-%m-%d %H:%M:%S %Z")"
+                echo "软件中心: 已集成 (release/src/router/softcenter)"
+                echo "SHA256: $(awk "{print \$1}" "$FW_FILE.sha256")"
+                echo "修复: 内核 dev_queue_xmit_nit protocol-0000 日志风暴限速 (1条/10分钟)"
+              } > dist/firmware-info.txt
+              ls -la dist/
+            '
         - name: 发布 CNB Release
           type: git:release
           options:
