@@ -7,8 +7,7 @@
 # v1 与 GH 链路的差异:
 # - 无 Prepare/Build 两段拆分与 prep-env 缓存, 单流水线每次全量构建;
 # - 产物直接发成 CNB Release (git:release + attachments), 旧版清理暂未实现。
-
-main:
+"**":
   push:
     - name: merlin-xd4-firmware
       docker:
