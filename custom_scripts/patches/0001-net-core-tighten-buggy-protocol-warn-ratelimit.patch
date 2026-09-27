@@ -1,0 +1,52 @@
+XD4 (BCM6755) "protocol 0000 is buggy, dev archer" 日志风暴修复。
+
+根因: 闭源 archer 加速器驱动 (bcmdrivers/broadcom/char/archer/impl1/ 下只有
+Makefile 与 *.o_saved 预编译产物, 无法改源) 发出的 skb 网络头越界; 内核
+dev_queue_xmit_nit() 在任何抓包 tap (ptype_all) 活跃时为每个发包克隆 tap
+副本, 检测到越界即以 net_info_ratelimited (默认 10 条/5 秒) 持续打印。该
+告警只影响 tap 克隆副本 (本就会被丢弃), 不影响数据面转发。
+
+修复: 将该调用点的打印收紧为 1 条/10 分钟 (DEFINE_RATELIMIT_STATE),
+并补上 <linux/ratelimit.h> 显式 include。丢包行为与数据面均不变。
+
+---
+ release/src-rt-5.02axhnd.675x/kernel/linux-4.1/net/core/dev.c | 16 +++++++++-----
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/release/src-rt-5.02axhnd.675x/kernel/linux-4.1/net/core/dev.c b/release/src-rt-5.02axhnd.675x/kernel/linux-4.1/net/core/dev.c
+--- a/release/src-rt-5.02axhnd.675x/kernel/linux-4.1/net/core/dev.c
++++ b/release/src-rt-5.02axhnd.675x/kernel/linux-4.1/net/core/dev.c
+@@ -54,6 +54,7 @@
+ #include <linux/errno.h>
+ #include <linux/interrupt.h>
+ #include <linux/if_ether.h>
++#include <linux/ratelimit.h>
+ #include <linux/netdevice.h>
+ #include <linux/etherdevice.h>
+ #include <linux/ethtool.h>
+@@ -1963,13 +1963,22 @@
+ 		 */
+ 		skb_reset_mac_header(skb2);
+ 
+ 		if (skb_network_header(skb2) < skb2->data ||
+ 		    skb_network_header(skb2) > skb_tail_pointer(skb2)) {
++			/*
++			 * XD4/archer: 闭源 archer 加速器发出的 skb 网络头越界,
++			 * 抓包 tap 活跃时默认 net_ratelimit (10 条/5 秒) 仍会
++			 * 刷爆 syslog, 收紧为 1 条/10 分钟。仅影响打印频率,
++			 * tap 克隆丢弃行为与数据面均不变。
++			 */
++			static DEFINE_RATELIMIT_STATE(buggy_proto_rs, 600 * HZ, 1);
++
++			if (__ratelimit(&buggy_proto_rs))
+-			net_info_ratelimited("protocol %04x is buggy, dev %s\n",
+-					     ntohs(skb2->protocol),
+-					     dev->name);
++				net_info_ratelimited("protocol %04x is buggy, dev %s\n",
++						     ntohs(skb2->protocol),
++						     dev->name);
+ 			skb_reset_network_header(skb2);
+ 		}
+ 
+ 		skb2->transport_header = skb2->network_header;
+ 		skb2->pkt_type = PACKET_OUTGOING;

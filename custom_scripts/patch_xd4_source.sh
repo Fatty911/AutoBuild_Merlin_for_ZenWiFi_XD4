@@ -526,3 +526,29 @@ echo "=== 验证 ==="
 grep -c "RT-AX56_XD4" "$TARGET_MAK" | xargs echo "RT-AX56_XD4 出现次数:"
 ls -d "$RSDIR/router-sysdep.rt-ax56_xd4" >/dev/null && echo "router-sysdep.rt-ax56_xd4: OK"
 ls "$RSDIR/hostTools/prebuilt/RT-AX56_XD4/addvtoken" >/dev/null && echo "prebuilt/RT-AX56_XD4/addvtoken: OK"
+
+# --- XD4 archer 日志风暴修复 (2026-09-28) ---
+# 现象: syslog 持续刷 "protocol 0000 is buggy, dev archer"。根因: 闭源
+# archer 加速器 (bcmdrivers/broadcom/char/archer/impl1/ 只有 Makefile 与
+# *.o_saved 预编译产物, 无法改源) 发出的 skb 网络头越界, 内核
+# dev_queue_xmit_nit() 在抓包 tap 活跃时以默认 net_ratelimit (10 条/5 秒)
+# 逐条打印。修复: 该告警点收紧为 1 条/10 分钟, 数据面与丢包行为不变。
+# 补丁应用失败按构建失败处理 (宁可不发固件, 不发静默未修复的固件)。
+PATCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/patches"
+KERNEL_DEV_C="release/src-rt-5.02axhnd.675x/kernel/linux-4.1/net/core/dev.c"
+ARCHER_PATCH="$PATCH_DIR/0001-net-core-tighten-buggy-protocol-warn-ratelimit.patch"
+if [ ! -f "$REPO_DIR/$KERNEL_DEV_C" ]; then
+  echo "::error::archer 风暴修复: 未找到 $KERNEL_DEV_C"
+  exit 1
+fi
+if grep -q "buggy_proto_rs" "$REPO_DIR/$KERNEL_DEV_C"; then
+  echo "✅ archer 日志风暴修复已应用 (幂等跳过)"
+elif git -C "$REPO_DIR" apply --check "$ARCHER_PATCH" 2>/dev/null && git -C "$REPO_DIR" apply "$ARCHER_PATCH"; then
+  echo "✅ archer 日志风暴修复已应用 (git apply)"
+elif patch -p1 --forward -N -s -d "$REPO_DIR" < "$ARCHER_PATCH"; then
+  echo "✅ archer 日志风暴修复已应用 (patch -p1)"
+else
+  echo "::error::archer 风暴修复补丁应用失败 (上游 dev.c 可能已漂移, 需更新补丁)"
+  exit 1
+fi
+grep -c "buggy_proto_rs" "$KERNEL_DEV_C" | xargs echo "archer 风暴修复标记出现次数:"
