@@ -205,19 +205,21 @@
                 if os.path.isdir(f):
                     continue
                 size = os.path.getsize(f)
+                # CNB 对"创建资源"语义返回 201 而非 200(实测 asset-upload-url=201),
+                # 所有成功判断放宽为 2xx
                 st, data = call(f"/-/releases/{rel['id']}/asset-upload-url",
                                 method="POST",
                                 form={"asset_name": os.path.basename(f),
                                       "overwrite": True, "size": size, "ttl": 180})
-                if st != 200:
+                if not (200 <= st < 300):
                     print(f"[FAIL] {f} 取上传URL失败", st, data[:200]); sys.exit(1)
                 up = json.loads(data)
                 st, data = call(up["upload_url"], method="PUT",
                                 raw=open(f, "rb").read())
-                if st != 200:
+                if not (200 <= st < 300):
                     print(f"[FAIL] {f} PUT 失败", st, data[:200]); sys.exit(1)
                 st, data = call(up["verify_url"], method="POST")
-                if st not in (200, 201):
+                if not (200 <= st < 300):
                     print(f"[FAIL] {f} 确认失败", st, data[:200]); sys.exit(1)
                 print(f"[OK] 附件: {os.path.basename(f)} ({size} bytes)")
             print("[DONE] Release:", TAG)
