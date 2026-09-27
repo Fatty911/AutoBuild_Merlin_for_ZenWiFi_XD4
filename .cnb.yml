@@ -189,14 +189,17 @@
             st, data = call(f"/-/releases/tags/{TAG}")
             if st == 200:
                 rel = json.loads(data)
-                st, data = call(f"/-/releases/{rel['id']}", method="PATCH", form=meta)
-                print("[OK] release 已更新:", st)
+                # PATCH 返回 200 空 body(实测), 不可 json.loads; 直接复用 rel
+                st2, data2 = call(f"/-/releases/{rel['id']}", method="PATCH", form=meta)
+                print("[OK] release 已更新:", st2)
+                if st2 != 200:
+                    print("[FAIL] release 更新失败", st2, data2[:300]); sys.exit(1)
             else:
                 st, data = call("/-/releases", method="POST", form=meta)
                 print("[OK] release 已创建:", st)
-            if st not in (200, 201):
-                print("[FAIL] release 写入失败", st, data[:300]); sys.exit(1)
-            rel = json.loads(data)
+                if st not in (200, 201):
+                    print("[FAIL] release 创建失败", st, data[:300]); sys.exit(1)
+                rel = json.loads(data)
 
             for f in files:
                 if os.path.isdir(f):
