@@ -152,10 +152,14 @@
                 print("[FAIL] CNB_TOKEN 环境变量不存在"); sys.exit(1)
             AUTH = "Basic " + base64.b64encode(f"cnb:{TOKEN}".encode()).decode()
 
-            def call(path, method="GET", form=None, raw=None):
-                r = urllib.request.Request(API + path, method=method)
-                r.add_header("Accept", "application/json")
-                r.add_header("Authorization", AUTH)
+            def call(path, method="GET", form=None, raw=None, auth=True):
+                # path 可为 API 相对路径或完整 URL(verify_url 返回完整地址);
+                # PUT 到 asset.cnb.cool 预签名地址绝不带认证头(实测带上即 404)
+                url = path if path.startswith("http") else API + path
+                r = urllib.request.Request(url, method=method)
+                if auth:
+                    r.add_header("Accept", "application/json")
+                    r.add_header("Authorization", AUTH)
                 body = None
                 if form is not None:
                     body = json.dumps(form, ensure_ascii=False).encode("utf-8")
@@ -215,7 +219,7 @@
                     print(f"[FAIL] {f} 取上传URL失败", st, data[:200]); sys.exit(1)
                 up = json.loads(data)
                 st, data = call(up["upload_url"], method="PUT",
-                                raw=open(f, "rb").read())
+                                raw=open(f, "rb").read(), auth=False)
                 if not (200 <= st < 300):
                     print(f"[FAIL] {f} PUT 失败", st, data[:200]); sys.exit(1)
                 st, data = call(up["verify_url"], method="POST")
