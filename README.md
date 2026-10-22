@@ -30,9 +30,9 @@
 
 ### 2. 自动构建
 
-- **上游更新检查**：`update_checker_for_Merlin.yml` 每 6 小时检查 SWRT-dev/asuswrt-bcm 的 **多个分支**（`386` 当前默认 + `24353`/`master` 388 线——将来若 388 线官方支持 XD4，会被自动发现并触发对应分支构建），有更新时自动触发构建（repository_dispatch，构建工作流按 payload 分支构建）
-- **构建工作流内联兜底**：每 12 小时自检一次上游 386 分支 HEAD，有变化才构建（缓存命中则跳过，不消耗构建时长）
-- 推送修改 `.github/workflows/` 或 `custom_scripts/` 也会触发
+- **上游更新检查**：`update_checker_for_Merlin.yml` 每 6 小时检查 `386`、`24353`、`master`；当前只有 `386` 有更新时发送 `Merlin Source Code Update` 的 `repository_dispatch`，先触发 **Prepare Build Environment**。Prepare 成功完成后，**Build Merlin Firmware for ZenWiFi XD4** 通过 `workflow_run` 进入构建。
+- **Build 触发边界**：当前 Build 工作流只声明手动 `workflow_dispatch` 和 Prepare 完成的 `workflow_run`，不再直接监听 `schedule` 或 `repository_dispatch`；文件中旧 schedule 条件步骤不代表仍有定时触发器。
+- **推送触发 Prepare 的范围**：main 分支上修改 `.github/workflows/Prepare_Build_Environment.yml` 或 `custom_scripts/patch_xd4_source.sh`；不是任意工作流或脚本修改都会触发 Prepare。
 
 ### 3. AI 自动修复（自发现 + 大模型自修复）
 
@@ -61,13 +61,13 @@
 2. 发布 **Release**（tag 形如 `Merlin_XD4_RT-AX56_XD4_3.0.0.4_386_xxx_<run>`）
 3. 自动清理旧 Release，只保留最近 3 个
 
-固件文件：`RT-AX56_XD4_3.0.0.4_386_xxx.trx` + `.sha256` 校验文件 + `firmware-info.txt` 构建信息。
+固件文件：构建产出的 `.w` 固件（发布步骤选择非 `cferom` 文件，并核验固件内的 XD4 机型标识）+ `.sha256` 校验文件 + `firmware-info.txt` 构建信息。
 
 ## 刷机步骤
 
-1. 下载 `.trx` 固件，用 `sha256sum`（Windows 可用 `certutil -hashfile`）核对 SHA256
+1. 下载本次 Release 中适用于 XD4 的 `.w` 固件，用 `sha256sum`（Windows 可用 `certutil -hashfile`）核对 SHA256
 2. 浏览器登录路由器管理页（192.168.50.1）→ **系统管理** → **固件升级**
-3. 选择 `.trx` 文件，等待升级完成（约 5 分钟，期间不要断电）
+3. 选择已核验的 `.w` 文件，等待升级完成（约 5 分钟，期间不要断电）
 4. 升级后建议 **恢复出厂设置**（系统管理 → 恢复/导出/上传设置 → 恢复原厂默认值），避免旧配置残留问题
 
 > ⚠️ 刷机有风险！请确保已备份当前配置。跨版本降级可能损坏配置分区。
