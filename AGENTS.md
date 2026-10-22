@@ -4,7 +4,7 @@
 
 每次构建发布前必须通过 `custom_scripts/validate_build_output.py --gate`：
 
-1. 固件文件存在且文件名匹配机型模式（`RT-AX56_XD4_*.trx`）
+1. `.w` 固件文件存在，且固件全文包含预期机型标识（默认 `RT-AX56_XD4`）；机型校验不是依赖文件名匹配
 2. 固件大小 ≥ 10 MB
 3. 软件中心源码已集成（`release/src/router/softcenter/Softcenter.asp` 与 `softcenter.sh`）
 
