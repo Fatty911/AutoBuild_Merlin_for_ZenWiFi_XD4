@@ -5,7 +5,7 @@
 ## 固件特性
 
 - 基于 [SWRT-dev/asuswrt-bcm](https://github.com/SWRT-dev/asuswrt-bcm)（梅林 MerlinR 系列，koolshare 软件中心生态的延续）
-- **386 分支**：与 ZenWiFi XD4 官方固件线（3.0.0.4.386_xxxxx）同代，和你路由器当前的 Koolcenter 386 固件同线
+- **386 分支**：与 ZenWiFi XD4 官方固件线（3.0.0.4.386_xxxxx）同代，与 Koolcenter 386 固件同线
 - **内置软件中心（softcenter）**：刷机后即可安装第三方插件（fancyss 科学上网、aria2、ddns 等）
 - XD4 专用配置构建（`947622GW.RT-AX56_XD4`，`BRCM_BOARD_ID="XD4"`）
 - 全自动：上游更新检测 → 编译 → 质量门 → 发布 Release → 旧版本清理
@@ -128,3 +128,4 @@
 - [koolshare / koolcenter](https://www.asusgo.com)：软件中心生态
 
 本仓库仅自动化编译，固件版权归原作者所有。仅供个人学习研究使用，刷机风险自负。
+
